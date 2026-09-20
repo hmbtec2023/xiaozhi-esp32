@@ -5,6 +5,8 @@
 #include "mcp_server.h"
 
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 class HmbtecLightController {
 private:
@@ -27,6 +29,40 @@ private:
     }
 
 public:
+    void FinishLichtblick() {
+        if (led_strip_ == nullptr) {
+            return;
+        }
+
+        ESP_LOGI(
+            "HmbtecLight",
+            "Lichtblick finished -> keep breathing for 5 seconds"
+        );
+
+        xTaskCreate(
+            [](void* arg) {
+                auto* self = static_cast<HmbtecLightController*>(arg);
+
+                // Keep the AI-selected breathing animation running.
+                vTaskDelay(pdMS_TO_TICKS(5000));
+
+                ESP_LOGI(
+                    "HmbtecLight",
+                    "Lichtblick afterglow finished -> light off"
+                );
+
+                self->led_strip_->SetAllColor({0, 0, 0});
+
+                vTaskDelete(nullptr);
+            },
+            "lichtblick_afterglow",
+            2048,
+            this,
+            2,
+            nullptr
+        );
+    }
+
     explicit HmbtecLightController(CircularStrip* led_strip)
         : led_strip_(led_strip) {
 

@@ -110,6 +110,7 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
+    void RegisterOneShotFinishedCallback(std::function<void()> callback);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -137,6 +138,8 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
+    bool one_shot_invocation_active_ = false;
+    std::function<void()> one_shot_finished_callback_;
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;

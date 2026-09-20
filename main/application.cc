@@ -915,6 +915,19 @@ void Application::InitializeProtocol() {
                                     kDeviceStateIdle
                                 );
 
+                                if (one_shot_invocation_active_) {
+                                    ESP_LOGI(
+                                        TAG,
+                                        "One-shot invocation finished"
+                                    );
+
+                                    one_shot_invocation_active_ = false;
+
+                                    if (one_shot_finished_callback_) {
+                                        one_shot_finished_callback_();
+                                    }
+                                }
+
                             } else {
                                 SetDeviceState(
                                     kDeviceStateListening
@@ -2326,6 +2339,10 @@ bool Application::UpgradeFirmware(
  * manual_stop = true:
  *     one-shot Lichtblick behaviour.
  */
+void Application::RegisterOneShotFinishedCallback(std::function<void()> callback) {
+    one_shot_finished_callback_ = std::move(callback);
+}
+
 void Application::WakeWordInvoke(
     const std::string& wake_word,
     bool manual_stop) {
@@ -2333,9 +2350,12 @@ void Application::WakeWordInvoke(
     if (!protocol_) {
         return;
     }
+    if (manual_stop) {
+        one_shot_invocation_active_ = true;
+        ESP_LOGI(TAG, "One-shot invocation activated");
+    }
 
-    auto state =
-        GetDeviceState();
+    auto state = GetDeviceState();
 
     if (state ==
         kDeviceStateIdle) {

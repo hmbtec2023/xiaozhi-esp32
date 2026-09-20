@@ -69,6 +69,7 @@ private:
     Button boot_button_;
     Button lichtblick_button_;
     CircularStrip* pixel_ring_ = nullptr;
+    HmbtecLightController* light_controller_ = nullptr;
     LcdDisplay *display_;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
@@ -251,7 +252,17 @@ private:
 
     void InitializeTools() {
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
-        static HmbtecLightController light(pixel_ring_);
+
+        light_controller_ = new HmbtecLightController(pixel_ring_);
+
+        auto& app = Application::GetInstance();
+
+        app.RegisterOneShotFinishedCallback([this]() {
+            if (light_controller_ != nullptr) {
+                ESP_LOGI(TAG, "Lichtblick one-shot finished -> start 5s afterglow");
+                light_controller_->FinishLichtblick();
+            }
+        });
     }
 
 public:
