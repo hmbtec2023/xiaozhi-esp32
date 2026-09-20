@@ -24,6 +24,9 @@
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 #define BUILTIN_LED_GPIO GPIO_NUM_42
 
+//--- HMB|TEC Lichtblick Erweiterungen
+#define HMBTEC_BUZZER_GPIO GPIO_NUM_2
+
 //屏幕显示部分
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_45
 

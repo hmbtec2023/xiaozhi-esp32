@@ -196,6 +196,32 @@ private:
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
+    void InitializeBuzzer() {
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = 1ULL << HMBTEC_BUZZER_GPIO;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+        // Aktiver Buzzer: HIGH = ein, LOW = aus
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 0);
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 0);
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(HMBTEC_BUZZER_GPIO, 0);
+    }
+
     void InitializeTools() {
     }
 
@@ -208,6 +234,7 @@ public:
         InitializeLcdDisplay();
         InitializeTouch();
         InitializeButtons();
+        InitializeBuzzer(); // HMB
         InitializeTools();
         GetBacklight()->SetBrightness(100);
     }
