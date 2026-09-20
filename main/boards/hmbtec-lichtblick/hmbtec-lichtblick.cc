@@ -170,7 +170,7 @@ private:
             ESP_LOGI(TAG, "Lichtblick button pressed -> AI prompt");
 
             auto &app = Application::GetInstance();
-            app.WakeWordInvoke("Lichtblick");
+            app.WakeWordInvoke("Lichtblick", true);
         });
     }
 

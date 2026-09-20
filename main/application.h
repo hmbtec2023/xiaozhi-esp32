@@ -109,7 +109,7 @@ public:
     void StopListening();
 
     void Reboot();
-    void WakeWordInvoke(const std::string& wake_word);
+    void WakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -165,8 +165,8 @@ private:
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
-    void BeginWakeWordInvoke(const std::string& wake_word);
-    void ContinueWakeWordInvoke(const std::string& wake_word);
+    void BeginWakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
+    void ContinueWakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
     void StartListeningAudio();
     void ConfigureWakeWordForListening();
     void StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles);
