@@ -1,0 +1,9 @@
+{
+    "type": "hmbtec-lichtblick",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "hmbtec-lichtblick"
+        }
+    ]
+}
