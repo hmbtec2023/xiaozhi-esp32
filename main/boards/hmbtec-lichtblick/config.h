@@ -26,6 +26,7 @@
 
 //--- HMB|TEC Lichtblick Erweiterungen
 #define HMBTEC_BUZZER_GPIO GPIO_NUM_2
+#define HMBTEC_BUTTON_GPIO GPIO_NUM_3
 
 //屏幕显示部分
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_45

@@ -23,6 +23,8 @@
 #include "system_reset.h"
 #include "esp_lcd_ili9341.h"
 
+#include "buzzer_controller.h"
+
 #define TAG "HmbtecLichtblick"
 
 class TouchDriver {
@@ -63,6 +65,7 @@ private:
 class HmbtecLichtblick : public WifiBoard {
 private:
     Button boot_button_;
+    Button lichtblick_button_;
     LcdDisplay *display_;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
@@ -159,6 +162,13 @@ private:
             }
             app.ToggleChatState();
         });
+
+        lichtblick_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "Lichtblick button pressed -> AI prompt");
+
+            auto &app = Application::GetInstance();
+            app.WakeWordInvoke("Lichtblick");
+        });
     }
 
     void InitializeLcdDisplay() {
@@ -223,10 +233,13 @@ private:
     }
 
     void InitializeTools() {
+        static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
     }
 
 public:
-    HmbtecLichtblick(): boot_button_(BOOT_BUTTON_GPIO)
+    HmbtecLichtblick()
+        : boot_button_(BOOT_BUTTON_GPIO),
+        lichtblick_button_(HMBTEC_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializeBatteryMonitor();
@@ -266,5 +279,6 @@ public:
         return true;
     }
 };
+
 
 DECLARE_BOARD(HmbtecLichtblick);
