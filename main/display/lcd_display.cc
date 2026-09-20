@@ -25,6 +25,11 @@ LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_material_symbols_30_4);
 LV_FONT_DECLARE(font_noto_emoji_30_4);
 
+#if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+LV_IMAGE_DECLARE(logo_hmbtec_96);
+#endif
+
+
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
     auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
@@ -888,14 +893,19 @@ void LcdDisplay::SetupUI() {
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
 
     emoji_label_ = lv_label_create(emoji_box_);
-#if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
-    // HMB|TEC Lichtblick startup branding.
-    // SetEmotion() later replaces both font and content with the normal emotion.
-    lv_obj_set_style_text_font(emoji_label_, text_font, 0);
-    lv_obj_set_style_text_align(emoji_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
-    lv_label_set_text(emoji_label_, "LICHTBLICK\nHMB | TEC");
-#else
+    #if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+        // HMB|TEC Lichtblick startup branding.
+        // SetEmotion() later replaces both font and content with the normal emotion.
+        lv_obj_set_style_text_font(emoji_label_, text_font, 0);
+        lv_obj_set_style_text_align(emoji_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+        lv_label_set_text(emoji_label_, "LICHTBLICK\n(C)2026 HMB | TEC");
+
+        // HMB|TEC logo shown during startup.
+        hmbtec_logo_ = lv_image_create(emoji_box_);
+        lv_image_set_src(hmbtec_logo_, &logo_hmbtec_96);
+        lv_obj_align_to(hmbtec_logo_, emoji_label_, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+    #else
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, MATERIAL_SYMBOLS_ROBOT_2);
@@ -1165,10 +1175,18 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         }
         if (utf8 != nullptr && emoji_label_ != nullptr) {
             DisplayLockGuard lock(this);
+
+            #if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+                if (hmbtec_logo_ != nullptr) {
+                    lv_obj_add_flag(hmbtec_logo_, LV_OBJ_FLAG_HIDDEN);
+                }
+            #endif
+
             if (gif_controller_) {
                 gif_controller_->Stop();
                 gif_controller_.reset();
             }
+                        
             lv_obj_set_style_text_font(emoji_label_, emotion_font, 0);
             lv_label_set_text(emoji_label_, utf8);
             lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
@@ -1178,6 +1196,13 @@ void LcdDisplay::SetEmotion(const char* emotion) {
     }
 
     DisplayLockGuard lock(this);
+    #if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+    if (hmbtec_logo_ != nullptr) {
+        lv_obj_add_flag(hmbtec_logo_, LV_OBJ_FLAG_HIDDEN);
+    }
+    #endif
+
+
     // Stop any running GIF animation in the same lock scope as setting new image
     // to prevent LVGL from accessing freed image data between operations
     if (gif_controller_) {

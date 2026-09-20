@@ -26,6 +26,11 @@ protected:
     lv_obj_t* preview_image_ = nullptr;
     lv_obj_t* emoji_label_ = nullptr;
     lv_obj_t* emoji_image_ = nullptr;
+    
+    #if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+        lv_obj_t* hmbtec_logo_ = nullptr;
+    #endif
+
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
