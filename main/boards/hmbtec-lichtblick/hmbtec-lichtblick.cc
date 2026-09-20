@@ -24,6 +24,8 @@
 #include "esp_lcd_ili9341.h"
 
 #include "buzzer_controller.h"
+#include "led/circular_strip.h"
+#include "light_controller.h"
 
 #define TAG "HmbtecLichtblick"
 
@@ -66,6 +68,7 @@ class HmbtecLichtblick : public WifiBoard {
 private:
     Button boot_button_;
     Button lichtblick_button_;
+    CircularStrip* pixel_ring_ = nullptr;
     LcdDisplay *display_;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
@@ -232,8 +235,23 @@ private:
         gpio_set_level(HMBTEC_BUZZER_GPIO, 0);
     }
 
+    void InitializePixelRing() {
+        ESP_LOGI(TAG, "Initializing HMBTEC NeoPixel ring: GPIO%d, %d pixels",
+                HMBTEC_PIXEL_RING_GPIO, HMBTEC_PIXEL_RING_COUNT);
+
+        pixel_ring_ = new CircularStrip(HMBTEC_PIXEL_RING_GPIO, HMBTEC_PIXEL_RING_COUNT);
+
+        // Hardwaretest: alle 8 Pixel kurz warmweiß
+        pixel_ring_->SetAllColor({80, 60, 30});
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Danach aus
+        pixel_ring_->SetAllColor({0, 0, 0});
+    }
+
     void InitializeTools() {
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
+        static HmbtecLightController light(pixel_ring_);
     }
 
 public:
@@ -248,6 +266,7 @@ public:
         InitializeTouch();
         InitializeButtons();
         InitializeBuzzer(); // HMB
+        InitializePixelRing(); // HMB
         InitializeTools();
         GetBacklight()->SetBrightness(100);
     }
