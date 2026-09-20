@@ -888,9 +888,18 @@ void LcdDisplay::SetupUI() {
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
 
     emoji_label_ = lv_label_create(emoji_box_);
+#if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK
+    // HMB|TEC Lichtblick startup branding.
+    // SetEmotion() later replaces both font and content with the normal emotion.
+    lv_obj_set_style_text_font(emoji_label_, text_font, 0);
+    lv_obj_set_style_text_align(emoji_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(emoji_label_, "LICHTBLICK\nHMB | TEC");
+#else
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, MATERIAL_SYMBOLS_ROBOT_2);
+#endif
 
     emoji_image_ = lv_img_create(emoji_box_);
     lv_obj_center(emoji_image_);
