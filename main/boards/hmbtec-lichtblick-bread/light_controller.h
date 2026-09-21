@@ -44,7 +44,7 @@ public:
                 auto* self = static_cast<HmbtecLightController*>(arg);
 
                 // Keep the AI-selected breathing animation running.
-                vTaskDelay(pdMS_TO_TICKS(5000));
+                vTaskDelay(pdMS_TO_TICKS(30000));
 
                 ESP_LOGI(
                     "HmbtecLight",
