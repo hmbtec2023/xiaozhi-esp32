@@ -62,6 +62,6 @@
 #define HMBTEC_BUZZER_GPIO       GPIO_NUM_2
 #define HMBTEC_BUTTON_GPIO       GPIO_NUM_44   // RX -> Lichtblick-Taster
 #define HMBTEC_PIXEL_RING_GPIO   GPIO_NUM_43   // TX -> 8x NeoPixel-Ring
-#define HMBTEC_PIXEL_RING_COUNT  8
+#define HMBTEC_PIXEL_RING_COUNT  12
 
 #endif // _BOARD_CONFIG_H_

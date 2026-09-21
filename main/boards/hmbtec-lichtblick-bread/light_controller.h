@@ -7,11 +7,13 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <functional>
 
 class HmbtecLightController {
 private:
     CircularStrip* led_strip_;
     int brightness_level_ = 4;
+    std::function<void()> afterglow_finished_callback_;
 
     int LevelToBrightness(int level) const {
         if (level < 0) level = 0;
@@ -29,6 +31,10 @@ private:
     }
 
 public:
+    void SetAfterglowFinishedCallback(std::function<void()> callback) {
+        afterglow_finished_callback_ = std::move(callback);
+    }
+
     void FinishLichtblick() {
         if (led_strip_ == nullptr) {
             return;
@@ -48,10 +54,14 @@ public:
 
                 ESP_LOGI(
                     "HmbtecLight",
-                    "Lichtblick afterglow finished -> light off"
+                    "Lichtblick afterglow finished"
                 );
 
-                self->led_strip_->SetAllColor({0, 0, 0});
+                if (self->afterglow_finished_callback_) {
+                    self->afterglow_finished_callback_();
+                } else {
+                    self->led_strip_->SetAllColor({0, 0, 0});
+                }
 
                 vTaskDelete(nullptr);
             },

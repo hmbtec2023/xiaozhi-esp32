@@ -2343,6 +2343,10 @@ void Application::RegisterOneShotFinishedCallback(std::function<void()> callback
     one_shot_finished_callback_ = std::move(callback);
 }
 
+int Application::RegisterStateChangeListener(std::function<void(DeviceState, DeviceState)> callback) {
+    return state_machine_.AddStateChangeListener(std::move(callback));
+}
+
 void Application::WakeWordInvoke(
     const std::string& wake_word,
     bool manual_stop) {

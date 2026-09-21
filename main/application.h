@@ -111,6 +111,7 @@ public:
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
     void RegisterOneShotFinishedCallback(std::function<void()> callback);
+    int RegisterStateChangeListener(std::function<void(DeviceState, DeviceState)> callback);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);

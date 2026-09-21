@@ -15,6 +15,7 @@
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include <ctime>
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -36,6 +37,8 @@ private:
     CircularStrip* pixel_ring_ = nullptr;
     HmbtecLightController* light_controller_ = nullptr;
     bool lichtblick_ptt_active_ = false;
+    bool lichtblick_effect_active_ = false;
+    bool ptt_interaction_active_ = false;
 
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
@@ -129,10 +132,9 @@ private:
         // Release nach Long Press:
         //   Push-to-Talk beenden
         // ------------------------------------------------------------------------
-
         lichtblick_button_.OnClick([this]() {
             ESP_LOGI(TAG, "Lichtblick short press -> AI prompt");
-
+            lichtblick_effect_active_ = true;
             auto& app = Application::GetInstance();
             app.WakeWordInvoke("Lichtblick", true);
         });
@@ -141,6 +143,12 @@ private:
             ESP_LOGI(TAG, "Lichtblick long press -> PTT start");
 
             lichtblick_ptt_active_ = true;
+            ptt_interaction_active_ = true;
+
+            // Clock display must not remain visible during the voice interaction.
+            if (pixel_ring_ != nullptr) {
+                pixel_ring_->SetAllColor({0, 0, 0});
+            }
 
             auto& app = Application::GetInstance();
             app.StartListening();
@@ -194,6 +202,45 @@ private:
         });
     }
 
+    void ShowClockHour() {
+        if (pixel_ring_ == nullptr) {
+            return;
+        }
+
+    time_t now = time(nullptr);
+
+    // Vor einer gültigen Serversynchronisation keine falsche Uhrzeit anzeigen.
+    if (now < 1700000000) {
+        ESP_LOGW(TAG, "Clock: system time not synchronized yet");
+        pixel_ring_->SetAllColor({0, 0, 0});
+        return;
+    }
+
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    uint8_t hour = timeinfo.tm_hour % 12;
+
+    // Physischer Ring:
+    // Pixel 0 = 6 Uhr
+    // Zählrichtung = clockwise
+    // Daher liegt 12 Uhr auf Pixel 6.
+    uint8_t hour_pixel = (hour + 6) % 12;
+
+    ESP_LOGI(
+        TAG,
+        "Clock: %02d:%02d -> hour pixel %d",
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        hour_pixel
+    );
+
+    pixel_ring_->SetAllColor({0, 0, 0});
+
+    // Zunächst bewusst dezent.
+    pixel_ring_->SetSingleColor(hour_pixel, {20, 12, 4});
+}
+
     void InitializePixelRing() {
         ESP_LOGI(
             TAG,
@@ -207,11 +254,16 @@ private:
             HMBTEC_PIXEL_RING_COUNT
         );
 
-        // Hardwaretest: alle 8 Pixel kurz warmweiß
-        pixel_ring_->SetAllColor({80, 60, 30});
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // HMB|TEC startup ring animation
+        pixel_ring_->SetAllColor({0, 0, 0});
 
-        // Danach aus
+        for (uint8_t i = 0; i < HMBTEC_PIXEL_RING_COUNT; i++) {
+            pixel_ring_->SetAllColor({0, 0, 0});
+            pixel_ring_->SetSingleColor(i, {80, 60, 30});
+
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+
         pixel_ring_->SetAllColor({0, 0, 0});
     }
 
@@ -219,8 +271,32 @@ private:
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
 
         light_controller_ = new HmbtecLightController(pixel_ring_);
+        light_controller_->SetAfterglowFinishedCallback([this]() {
+            ESP_LOGI(TAG, "Lichtblick afterglow finished -> restore clock");
+            lichtblick_effect_active_ = false;
+            ShowClockHour();
+        });
 
         auto& app = Application::GetInstance();
+        app.RegisterStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
+            ESP_LOGI(
+                TAG,
+                "HMBTEC state change: %d -> %d",
+                static_cast<int>(old_state),
+                static_cast<int>(new_state)
+            );
+
+            if (new_state == kDeviceStateIdle && !lichtblick_effect_active_) {
+                if (ptt_interaction_active_) {
+                    ESP_LOGI(TAG, "PTT interaction finished -> restore clock");
+                    ptt_interaction_active_ = false;
+                } else {
+                    ESP_LOGI(TAG, "Idle -> show clock");
+                }
+
+                ShowClockHour();
+            }
+        });
 
         app.RegisterOneShotFinishedCallback([this]() {
             if (light_controller_ != nullptr) {
