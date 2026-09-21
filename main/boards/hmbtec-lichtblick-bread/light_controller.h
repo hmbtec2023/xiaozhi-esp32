@@ -36,7 +36,7 @@ public:
 
         ESP_LOGI(
             "HmbtecLight",
-            "Lichtblick finished -> keep breathing for 5 seconds"
+            "Lichtblick finished -> keep breathing for 30 seconds"
         );
 
         xTaskCreate(

@@ -35,7 +35,8 @@ private:
     Button lichtblick_button_;
     CircularStrip* pixel_ring_ = nullptr;
     HmbtecLightController* light_controller_ = nullptr;
-    
+    bool lichtblick_ptt_active_ = false;
+
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
             .i2c_port = (i2c_port_t)0,
@@ -116,11 +117,46 @@ private:
             app.ToggleChatState();
         });
 
-        lichtblick_button_.OnPressDown([this]() {
-            ESP_LOGI(TAG, "Lichtblick button pressed -> AI prompt");
+        // ------------------------------------------------------------------------
+        // HMB|TEC Lichtblick Button
+        //
+        // Short Press:
+        //   Lichtblick One-Shot
+        //
+        // Long Press >= 700 ms:
+        //   Push-to-Talk starten
+        //
+        // Release nach Long Press:
+        //   Push-to-Talk beenden
+        // ------------------------------------------------------------------------
+
+        lichtblick_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "Lichtblick short press -> AI prompt");
 
             auto& app = Application::GetInstance();
             app.WakeWordInvoke("Lichtblick", true);
+        });
+
+        lichtblick_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "Lichtblick long press -> PTT start");
+
+            lichtblick_ptt_active_ = true;
+
+            auto& app = Application::GetInstance();
+            app.StartListening();
+        });
+
+        lichtblick_button_.OnPressUp([this]() {
+            if (!lichtblick_ptt_active_) {
+                return;
+            }
+
+            ESP_LOGI(TAG, "Lichtblick PTT released -> stop listening");
+
+            lichtblick_ptt_active_ = false;
+
+            auto& app = Application::GetInstance();
+            app.StopListening();
         });
 
         touch_button_.OnPressDown([this]() {
@@ -188,7 +224,7 @@ private:
 
         app.RegisterOneShotFinishedCallback([this]() {
             if (light_controller_ != nullptr) {
-                ESP_LOGI(TAG, "Lichtblick one-shot finished -> start 5s afterglow");
+                ESP_LOGI(TAG, "Lichtblick one-shot finished -> start 30s afterglow");
                 light_controller_->FinishLichtblick();
             }
         });
@@ -200,7 +236,7 @@ public:
         touch_button_(TOUCH_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-        lichtblick_button_(HMBTEC_BUTTON_GPIO) {
+        lichtblick_button_(HMBTEC_BUTTON_GPIO, false, 700) {
         InitializeDisplayI2c();
         InitializeSsd1306Display();
         InitializeButtons();
