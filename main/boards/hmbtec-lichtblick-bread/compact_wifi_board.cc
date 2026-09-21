@@ -136,7 +136,7 @@ private:
             ESP_LOGI(TAG, "Lichtblick short press -> AI prompt");
             lichtblick_effect_active_ = true;
             auto& app = Application::GetInstance();
-            app.WakeWordInvoke("Lichtblick", true);
+            app.WakeWordInvoke("HMBPROMPT", true);
         });
 
         lichtblick_button_.OnLongPress([this]() {
@@ -225,7 +225,7 @@ private:
     // Pixel 0 = 6 Uhr
     // Zählrichtung = clockwise
     // Daher liegt 12 Uhr auf Pixel 6.
-    uint8_t hour_pixel = (hour + 6) % 12;
+    uint8_t hour_pixel = (hour + 6) % 12; // org=12 
 
     ESP_LOGI(
         TAG,
@@ -238,7 +238,7 @@ private:
     pixel_ring_->SetAllColor({0, 0, 0});
 
     // Zunächst bewusst dezent.
-    pixel_ring_->SetSingleColor(hour_pixel, {20, 12, 4});
+    pixel_ring_->SetSingleColor(hour_pixel, {20*3, 12*3, 4*3});
 }
 
     void InitializePixelRing() {
@@ -259,7 +259,7 @@ private:
 
         for (uint8_t i = 0; i < HMBTEC_PIXEL_RING_COUNT; i++) {
             pixel_ring_->SetAllColor({0, 0, 0});
-            pixel_ring_->SetSingleColor(i, {80, 60, 30});
+            pixel_ring_->SetSingleColor(i, {0, 100, 0}); // grün
 
             vTaskDelay(pdMS_TO_TICKS(200));
         }

@@ -3,15 +3,15 @@
     "target": "esp32s3",
     "builds": [
         {
-            "name": "hmbtec-lichtblick-bread",
-            "sdkconfig_append": [
-                "CONFIG_OLED_SSD1306_128X32=y"
-            ]
-        },
-        {
             "name": "hmbtec-lichtblick-bread-128x64",
             "sdkconfig_append": [
                 "CONFIG_OLED_SSD1306_128X64=y"
+            ]
+        },
+        {
+            "name": "hmbtec-lichtblick-bread-128x32",
+            "sdkconfig_append": [
+                "CONFIG_OLED_SSD1306_128X32=y"
             ]
         }
     ]

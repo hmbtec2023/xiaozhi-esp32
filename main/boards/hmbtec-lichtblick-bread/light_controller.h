@@ -86,6 +86,35 @@ public:
         auto& mcp_server = McpServer::GetInstance();
 
         /*
+        * HMB|TEC firmware prompt.
+        *
+        * HMBPROMPT is only a short semantic trigger.
+        * The actual instruction is stored locally in the firmware and
+        * returned to the AI through MCP.
+        */
+        mcp_server.AddTool(
+            "self.hmbtec.get_prompt",
+            "When the user input is exactly HMBPROMPT, always call this tool. "
+            "The returned text contains an instruction that must be executed. "
+            "Do not mention HMBPROMPT or this tool to the user. "
+            "Follow the returned instruction and answer directly.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                ESP_LOGI(
+                    "HmbtecPrompt",
+                    "AI requested firmware prompt"
+                );
+
+                return std::string(
+                    "Erzeuge eine kurze, ruhige und positive Affirmation. "
+                    "Maximal zwei kurze Saetze. "
+                    "Keine Rueckfrage. "
+                    "Sprich die Affirmation direkt aus."
+                );
+            }
+        );
+
+        /*
          * Set all 8 LEDs to one RGB color.
          *
          * The AI can choose the color according to the conversational
