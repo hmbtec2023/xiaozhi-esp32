@@ -17,6 +17,7 @@
 #include <esp_lcd_panel_vendor.h>
 #include <ctime>
 #include "ir_remote_controller.h"
+#include <esp_timer.h>
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -41,6 +42,14 @@ private:
     bool lichtblick_ptt_active_ = false;
     bool lichtblick_effect_active_ = false;
     bool ptt_interaction_active_ = false;
+    // ------------------------------------------------------------------------
+    // HMB|TEC IR light control
+    // ------------------------------------------------------------------------
+    StripColor ir_light_color_ = {255, 80, 20};  // warmes Standardlicht
+    int ir_brightness_level_ = 4;
+    bool ir_light_on_ = false;
+    uint8_t ir_last_command_ = 0;
+    int64_t ir_last_command_time_ = 0;
 
     void InitializeDisplayI2c() {
         i2c_master_bus_config_t bus_config = {
@@ -274,6 +283,160 @@ private:
         app.WakeWordInvoke("HMBPROMPT", true);
     }
 
+    void ApplyIrLight() {
+        if (pixel_ring_ == nullptr) {
+            return;
+        }
+
+        if (!ir_light_on_ || ir_brightness_level_ == 0) {
+            pixel_ring_->SetAllColor({0, 0, 0});
+            return;
+        }
+
+        // Level 1...8 -> ca. 12,5...100 %
+        const uint16_t scale = ir_brightness_level_;
+
+        StripColor color = {
+            static_cast<uint8_t>(
+                (static_cast<uint16_t>(ir_light_color_.red) * scale) / 8
+            ),
+            static_cast<uint8_t>(
+                (static_cast<uint16_t>(ir_light_color_.green) * scale) / 8
+            ),
+            static_cast<uint8_t>(
+                (static_cast<uint16_t>(ir_light_color_.blue) * scale) / 8
+            )
+        };
+
+        pixel_ring_->SetAllColor(color);
+
+        ESP_LOGI(
+            TAG,
+            "IR light: level=%d RGB=%d,%d,%d",
+            ir_brightness_level_,
+            color.red,
+            color.green,
+            color.blue
+        );
+    }
+
+    void HandleIrCommand(uint8_t command) {
+        const int64_t now = esp_timer_get_time();
+
+        // Gleichen IR-Befehl innerhalb von 300 ms nur einmal ausführen.
+        if (command == ir_last_command_ &&
+            (now - ir_last_command_time_) < 300000) {
+            ESP_LOGI(
+                TAG,
+                "IR duplicate ignored: 0x%02X",
+                command
+            );
+            return;
+        }
+
+        ir_last_command_ = command;
+        ir_last_command_time_ = now;
+
+        ESP_LOGI(TAG, "Handle IR command: 0x%02X", command);
+
+        if (pixel_ring_ == nullptr) {
+            // RESET muss auch ohne Pixelring funktionieren.
+            if (command == 0x42) {
+                ESP_LOGI(TAG, "IR RESET -> Lichtblick");
+                TriggerLichtblick();
+            } else {
+                ESP_LOGW(TAG, "IR light command ignored: pixel ring unavailable");
+            }
+            return;
+        }
+
+        switch (command) {
+            case 0x47:  // OFF
+                ESP_LOGI(TAG, "IR OFF");
+                ir_light_on_ = false;
+                ApplyIrLight();
+                break;
+
+            case 0x45:  // ON
+                ESP_LOGI(TAG, "IR ON");
+
+                if (ir_brightness_level_ == 0) {
+                    ir_brightness_level_ = 4;
+                }
+
+                ir_light_on_ = true;
+                ApplyIrLight();
+                break;
+
+            case 0x44:  // R
+                ESP_LOGI(TAG, "IR RED");
+                ir_light_color_ = {255, 0, 0};
+                ir_light_on_ = true;
+                ApplyIrLight();
+                break;
+
+            case 0x40:  // G
+                ESP_LOGI(TAG, "IR GREEN");
+                ir_light_color_ = {0, 255, 0};
+                ir_light_on_ = true;
+                ApplyIrLight();
+                break;
+
+            case 0x43:  // B
+                ESP_LOGI(TAG, "IR BLUE");
+                ir_light_color_ = {0, 0, 255};
+                ir_light_on_ = true;
+                ApplyIrLight();
+                break;
+
+            case 0x4A:  // UP
+                if (ir_brightness_level_ < 8) {
+                    ir_brightness_level_++;
+                }
+
+                ESP_LOGI(
+                    TAG,
+                    "IR BRIGHTNESS UP -> level %d",
+                    ir_brightness_level_
+                );
+
+                ir_light_on_ = true;
+                ApplyIrLight();
+                break;
+
+            case 0x52:  // DOWN
+                if (ir_brightness_level_ > 0) {
+                    ir_brightness_level_--;
+                }
+
+                ESP_LOGI(
+                    TAG,
+                    "IR BRIGHTNESS DOWN -> level %d",
+                    ir_brightness_level_
+                );
+
+                if (ir_brightness_level_ == 0) {
+                    ir_light_on_ = false;
+                }
+
+                ApplyIrLight();
+                break;
+
+            case 0x42:  // RESET
+                ESP_LOGI(TAG, "IR RESET -> Lichtblick");
+                TriggerLichtblick();
+                break;
+
+            default:
+                ESP_LOGI(
+                    TAG,
+                    "IR command 0x%02X currently not assigned",
+                    command
+                );
+                break;
+        }
+    }
+
     void InitializeTools() {
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
         auto& mcp_server = McpServer::GetInstance();
@@ -363,16 +526,8 @@ CompactWifiBoard() :
     InitializeSsd1306Display();
     InitializeButtons();
     ir_remote_.SetCommandCallback([this](uint8_t command) {
-        ESP_LOGI(
-            TAG,
-            "IR command received: 0x%02X",
-            command
-        );
-
-        if (command == 0x42) {
-            ESP_LOGI(TAG, "IR RESET -> Lichtblick");
-            TriggerLichtblick();
-        }
+        ESP_LOGI(TAG, "IR command received: 0x%02X", command);
+        HandleIrCommand(command);
     });
     ir_remote_.Initialize();
     if (HMBTEC_IR_RX_GPIO != HMBTEC_PIXEL_RING_GPIO) {
