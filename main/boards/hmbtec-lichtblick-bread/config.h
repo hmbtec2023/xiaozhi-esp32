@@ -61,7 +61,11 @@
 // ============================================================================
 #define HMBTEC_BUZZER_GPIO       GPIO_NUM_2
 #define HMBTEC_BUTTON_GPIO       GPIO_NUM_44   // RX -> Lichtblick-Taster
-#define HMBTEC_PIXEL_RING_GPIO   GPIO_NUM_43   // TX -> 8x NeoPixel-Ring
+#define HMBTEC_PIXEL_RING_GPIO   GPIO_NUM_43   // TX -> 12x NeoPixel-Ring
 #define HMBTEC_PIXEL_RING_COUNT  12
+
+// IR Remote Control
+// GPIO_NUM_NC = IR-Empfang derzeit hardwareseitig deaktiviert
+#define HMBTEC_IR_RX_GPIO        GPIO_NUM_43   // TX -> IR receiver test
 
 #endif // _BOARD_CONFIG_H_

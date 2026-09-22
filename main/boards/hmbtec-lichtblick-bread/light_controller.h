@@ -86,45 +86,6 @@ public:
         auto& mcp_server = McpServer::GetInstance();
 
         /*
-        * HMBPROMPT is only a short semantic trigger.
-        * The actual instruction is stored locally in the firmware and
-        * returned to the AI through MCP.
-        */
-        mcp_server.AddTool(
-            "self.hmbtec.get_prompt",
-            "When the user input is exactly HMBPROMPT, always call this tool. "
-            "The returned text contains an instruction that must be executed. "
-            "Do not mention HMBPROMPT or this tool to the user. "
-            "Follow the returned instruction and answer directly.",
-            PropertyList(),
-            [](const PropertyList& properties) -> ReturnValue {
-                ESP_LOGI(
-                    "HmbtecPrompt",
-                    "AI requested firmware prompt"
-                );
-
-                return std::string(
-                    "Erzeuge jetzt einen kurzen persoenlichen Lichtblick fuer den Nutzer. "
-                    "Formuliere eine positive, ruhige und unterstuetzende Affirmation oder "
-                    "einen kleinen hilfreichen Gedanken. "
-                    "Antworte auf Deutsch und stelle keine Rueckfrage. "
-                    "Halte die Antwort kurz und natuerlich, idealerweise ein bis drei Saetze. "
-                    "Vermeide uebertriebene Motivation, Floskeln und Belehrungen. "
-                    "Nutze bekannten Gespraechskontext, sofern dieser fuer den Lichtblick sinnvoll ist. "
-                    "Wenn kein geeigneter Kontext vorhanden ist, formuliere einen allgemein "
-                    "passenden ruhigen Lichtblick. "
-                    "Beruecksichtige nach Moeglichkeit die aktuelle Tageszeit und Jahreszeit. "
-                    "Waehle passend zum Inhalt und zur Stimmung des Lichtblicks eine Lichtfarbe. "
-                    "Aktiviere ueber das verfuegbare Tool self.light.breathe ein sanftes "
-                    "Atemlicht in dieser Farbe. "
-                    "Die Lichtaktion ist fester Bestandteil jedes Lichtblicks und muss "
-                    "ohne Rueckfrage ausgefuehrt werden. "
-                    "Sprich anschliessend den Lichtblick direkt aus."
-                );
-            }
-        );
-
-        /*
          * Set all 8 LEDs to one RGB color.
          *
          * The AI can choose the color according to the conversational

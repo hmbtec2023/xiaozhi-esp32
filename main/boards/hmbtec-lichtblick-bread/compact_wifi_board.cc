@@ -16,6 +16,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 #include <ctime>
+#include "ir_remote_controller.h"
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -36,6 +37,7 @@ private:
     Button lichtblick_button_;
     CircularStrip* pixel_ring_ = nullptr;
     HmbtecLightController* light_controller_ = nullptr;
+    HmbtecIrRemoteController ir_remote_;
     bool lichtblick_ptt_active_ = false;
     bool lichtblick_effect_active_ = false;
     bool ptt_interaction_active_ = false;
@@ -133,10 +135,8 @@ private:
         //   Push-to-Talk beenden
         // ------------------------------------------------------------------------
         lichtblick_button_.OnClick([this]() {
-            ESP_LOGI(TAG, "Lichtblick short press -> AI prompt");
-            lichtblick_effect_active_ = true;
-            auto& app = Application::GetInstance();
-            app.WakeWordInvoke("HMBPROMPT", true);
+            ESP_LOGI(TAG, "Lichtblick button -> trigger");
+            TriggerLichtblick();
         });
 
         lichtblick_button_.OnLongPress([this]() {
@@ -267,15 +267,60 @@ private:
         pixel_ring_->SetAllColor({0, 0, 0});
     }
 
+    void TriggerLichtblick() {
+        ESP_LOGI(TAG, "Lichtblick triggered");
+
+        auto& app = Application::GetInstance();
+        app.WakeWordInvoke("HMBPROMPT", true);
+    }
+
     void InitializeTools() {
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
+        auto& mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool(
+            "self.hmbtec.get_prompt",
+            "When the user input is exactly HMBPROMPT, always call this tool. "
+            "The returned text contains an instruction that must be executed. "
+            "Do not mention HMBPROMPT or this tool to the user. "
+            "Follow the returned instruction and answer directly.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                ESP_LOGI(
+                    "HmbtecPrompt",
+                    "AI requested firmware prompt"
+                );
 
-        light_controller_ = new HmbtecLightController(pixel_ring_);
-        light_controller_->SetAfterglowFinishedCallback([this]() {
-            ESP_LOGI(TAG, "Lichtblick afterglow finished -> restore clock");
-            lichtblick_effect_active_ = false;
-            ShowClockHour();
-        });
+                return std::string(
+                    "Erzeuge jetzt einen kurzen persoenlichen Lichtblick fuer den Nutzer. "
+                    "Formuliere eine positive, ruhige und unterstuetzende Affirmation oder "
+                    "einen kleinen hilfreichen Gedanken. "
+                    "Antworte auf Deutsch und stelle keine Rueckfrage. "
+                    "Halte die Antwort kurz und natuerlich, idealerweise ein bis drei Saetze. "
+                    "Vermeide uebertriebene Motivation, Floskeln und Belehrungen. "
+                    "Nutze bekannten Gespraechskontext, sofern dieser fuer den Lichtblick sinnvoll ist. "
+                    "Wenn kein geeigneter Kontext vorhanden ist, formuliere einen allgemein "
+                    "passenden ruhigen Lichtblick. "
+                    "Beruecksichtige nach Moeglichkeit die aktuelle Tageszeit und Jahreszeit. "
+                    "Waehle passend zum Inhalt und zur Stimmung des Lichtblicks eine Lichtfarbe. "
+                    "Falls das Tool self.light.breathe verfuegbar ist, aktiviere damit ein sanftes "
+                    "Atemlicht in dieser Farbe. "
+                    "Falls kein Licht-Tool verfuegbar ist, fahre ohne Lichtaktion fort. "
+                    "Sprich anschliessend den Lichtblick direkt aus."
+                );
+            }
+        );
+
+        if (pixel_ring_ != nullptr) {
+            light_controller_ = new HmbtecLightController(pixel_ring_);
+
+            light_controller_->SetAfterglowFinishedCallback([this]() {
+                ESP_LOGI(TAG, "Lichtblick afterglow finished -> restore clock");
+                lichtblick_effect_active_ = false;
+                ShowClockHour();
+            });
+        } else {
+            ESP_LOGW(TAG, "HMBTEC light controller disabled: no pixel ring available");
+        }
 
         auto& app = Application::GetInstance();
         app.RegisterStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -307,17 +352,39 @@ private:
     }
 
 public:
-    CompactWifiBoard() :
-        boot_button_(BOOT_BUTTON_GPIO),
-        touch_button_(TOUCH_BUTTON_GPIO),
-        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
-        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-        lichtblick_button_(HMBTEC_BUTTON_GPIO, false, 700) {
-        InitializeDisplayI2c();
-        InitializeSsd1306Display();
-        InitializeButtons();
+CompactWifiBoard() :
+    boot_button_(BOOT_BUTTON_GPIO),
+    touch_button_(TOUCH_BUTTON_GPIO),
+    volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+    volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+    lichtblick_button_(HMBTEC_BUTTON_GPIO, false, 700),
+    ir_remote_(HMBTEC_IR_RX_GPIO) {
+    InitializeDisplayI2c();
+    InitializeSsd1306Display();
+    InitializeButtons();
+    ir_remote_.SetCommandCallback([this](uint8_t command) {
+        ESP_LOGI(
+            TAG,
+            "IR command received: 0x%02X",
+            command
+        );
+
+        if (command == 0x42) {
+            ESP_LOGI(TAG, "IR RESET -> Lichtblick");
+            TriggerLichtblick();
+        }
+    });
+    ir_remote_.Initialize();
+    if (HMBTEC_IR_RX_GPIO != HMBTEC_PIXEL_RING_GPIO) {
         InitializePixelRing();
-        InitializeTools();
+    } else {
+        ESP_LOGW(
+            TAG,
+            "NeoPixel ring disabled: GPIO%d is currently used for IR RX",
+            HMBTEC_IR_RX_GPIO
+        );
+    }
+    InitializeTools();
     }
 
     virtual Led* GetLed() override {
