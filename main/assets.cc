@@ -279,7 +279,15 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
     }
 
     Assets::LoadSrmodelsFromIndex(assets, root.get());
-
+    // Headless mode:
+    // SR / Wakeword models are already loaded above.
+    // Skip all LVGL-dependent assets if no GUI-capable display is available.
+    auto display = Board::GetInstance().GetDisplay();
+    if (display == nullptr || !display->SupportsGuiOperations()) {
+        ESP_LOGI(TAG, "No GUI-capable display -> skipping LVGL assets");
+        return true;
+    }
+    
     auto& theme_manager = LvglThemeManager::GetInstance();
     auto light_theme = theme_manager.GetTheme("light");
     auto dark_theme = theme_manager.GetTheme("dark");

@@ -67,6 +67,33 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &display_i2c_bus_));
     }
 
+    bool DetectOled() {
+        constexpr uint8_t OLED_ADDRESS = 0x3C;
+
+        esp_err_t err = i2c_master_probe(
+            display_i2c_bus_,
+            OLED_ADDRESS,
+            100
+        );
+
+        if (err == ESP_OK) {
+            ESP_LOGI(
+                TAG,
+                "OLED detected at I2C address 0x%02X",
+                OLED_ADDRESS
+            );
+            return true;
+        }
+
+        ESP_LOGI(
+            TAG,
+            "No OLED detected at I2C address 0x%02X -> headless mode",
+            OLED_ADDRESS
+        );
+
+        return false;
+    }
+
     void InitializeSsd1306Display() {
         // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
@@ -83,7 +110,6 @@ private:
                 .disable_control_phase = 0,
             },
         };
-
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(display_i2c_bus_, &io_config, &panel_io_));
 
         ESP_LOGI(TAG, "Install SSD1306 driver");
@@ -96,11 +122,11 @@ private:
         };
         panel_config.vendor_config = &ssd1306_config;
 
-#ifdef SH1106
-        ESP_ERROR_CHECK(esp_lcd_new_panel_sh1106(panel_io_, &panel_config, &panel_));
-#else
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
-#endif
+        #ifdef SH1106
+                ESP_ERROR_CHECK(esp_lcd_new_panel_sh1106(panel_io_, &panel_config, &panel_));
+        #else
+                ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(panel_io_, &panel_config, &panel_));
+        #endif
         ESP_LOGI(TAG, "SSD1306 driver installed");
 
         // Reset the display
@@ -522,8 +548,15 @@ CompactWifiBoard() :
     volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
     lichtblick_button_(HMBTEC_BUTTON_GPIO, false, 700),
     ir_remote_(HMBTEC_IR_RX_GPIO) {
-    InitializeDisplayI2c();
-    InitializeSsd1306Display();
+
+        InitializeDisplayI2c();
+
+    if (DetectOled()) {
+        InitializeSsd1306Display();
+    } else {
+        display_ = new NoDisplay();
+    }
+
     InitializeButtons();
     ir_remote_.SetCommandCallback([this](uint8_t command) {
         ESP_LOGI(TAG, "IR command received: 0x%02X", command);
