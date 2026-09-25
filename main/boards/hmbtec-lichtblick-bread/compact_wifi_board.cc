@@ -170,8 +170,13 @@ private:
         //   Push-to-Talk beenden
         // ------------------------------------------------------------------------
         lichtblick_button_.OnClick([this]() {
-            ESP_LOGI(TAG, "Lichtblick button -> trigger");
+        #if SEELSORGE_EN
+            ESP_LOGI(TAG, "Lichtblick button -> Seelsorge");
+            TriggerSeelsorge();
+        #else
+            ESP_LOGI(TAG, "Lichtblick button -> Lichtblick");
             TriggerLichtblick();
+        #endif
         });
 
         lichtblick_button_.OnLongPress([this]() {
@@ -307,6 +312,16 @@ private:
 
         auto& app = Application::GetInstance();
         app.WakeWordInvoke("HMBPROMPT", true);
+    }
+
+    void TriggerSeelsorge(){
+        ESP_LOGI(TAG, "Seelsorge triggered");
+
+        auto& app = Application::GetInstance();
+
+        // Kein One-Shot:
+        // Nach der ersten KI-Antwort bleibt XiaoZhi im Dialogmodus.
+        app.WakeWordInvoke("HMBSEELSORGE", false);
     }
 
     void ApplyIrLight() {
@@ -498,9 +513,42 @@ private:
                 );
             }
         );
+        
+        mcp_server.AddTool(
+            "self.hmbtec.get_seelsorge_prompt",
+            "When the user input is exactly HMBSEELSORGE, always call this tool. "
+            "The returned text contains an instruction that must be executed. "
+            "Do not mention HMBSEELSORGE or this tool to the user. "
+            "Follow the returned instruction and answer directly.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                ESP_LOGI(
+                    "HmbtecSeelsorge",
+                    "AI requested Seelsorge prompt"
+                );
+
+                return std::string(
+                    "Beginne jetzt ein ruhiges, persoenliches und unterstuetzendes Gespraech mit dem Nutzer. "
+                    "Begruesse ihn kurz und natuerlich und stelle danach genau eine offene Frage, "
+                    "die ihm Raum gibt zu erzaehlen, was ihn gerade beschaeftigt. "
+                    "Warte anschliessend auf seine Antwort. "
+                    "Fuehre danach ein natuerliches Gespraech auf Deutsch. "
+                    "Hoere aufmerksam zu und gehe konkret auf das Gesagte ein. "
+                    "Stelle jeweils hoechstens eine Frage auf einmal. "
+                    "Vermeide Floskeln, vorschnelle Ratschlaege und uebertriebene Motivation. "
+                    "Behaupte keine Gefuehle oder Zustaende des Nutzers, die er nicht selbst genannt hat. "
+                    "Wenn passender Gespraechskontext vorhanden ist, darfst du ihn behutsam beruecksichtigen. "
+                    "Das Gespraech soll nach dieser ersten Antwort nicht beendet werden."
+                );
+            }
+        );
 
         if (pixel_ring_ != nullptr) {
             light_controller_ = new HmbtecLightController(pixel_ring_);
+            light_controller_->SetEffectStartedCallback([this]() {
+                ESP_LOGI(TAG, "Lichtblick light effect started");
+                lichtblick_effect_active_ = true;
+            });
 
             light_controller_->SetAfterglowFinishedCallback([this]() {
                 ESP_LOGI(TAG, "Lichtblick afterglow finished -> restore clock");
@@ -534,7 +582,12 @@ private:
 
         app.RegisterOneShotFinishedCallback([this]() {
             if (light_controller_ != nullptr) {
-                ESP_LOGI(TAG, "Lichtblick one-shot finished -> start 30s afterglow");
+                ESP_LOGI(TAG, "Lichtblick one-shot finished -> start 60s afterglow");
+
+                // Prevent Idle state from overwriting the breathing animation
+                // with the clock display.
+                lichtblick_effect_active_ = true;
+
                 light_controller_->FinishLichtblick();
             }
         });

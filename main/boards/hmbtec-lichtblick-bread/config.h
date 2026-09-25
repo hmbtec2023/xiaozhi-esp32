@@ -63,5 +63,6 @@
 // IR Remote Control
 // GPIO_NUM_NC = IR-Empfang derzeit hardwareseitig deaktiviert
 #define HMBTEC_IR_RX_GPIO        GPIO_NUM_18   // TX -> IR receiver 
+#define SEELSORGE_EN             1
 
 #endif // _BOARD_CONFIG_H_

@@ -71,7 +71,6 @@ private:
                 portMAX_DELAY
             );
 
-            ESP_LOGI(TAG, "RMT RX event: %u symbols", static_cast<unsigned>(symbol_count));
             self->ProcessFrame(symbol_count);
 
             if (!self->StartReceive()) {

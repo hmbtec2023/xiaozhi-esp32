@@ -14,6 +14,7 @@ private:
     CircularStrip* led_strip_;
     int brightness_level_ = 4;
     std::function<void()> afterglow_finished_callback_;
+    std::function<void()> effect_started_callback_;
 
     int LevelToBrightness(int level) const {
         if (level < 0) level = 0;
@@ -31,6 +32,9 @@ private:
     }
 
 public:
+    void SetEffectStartedCallback(std::function<void()> callback) {
+        effect_started_callback_ = std::move(callback);
+    }
     void SetAfterglowFinishedCallback(std::function<void()> callback) {
         afterglow_finished_callback_ = std::move(callback);
     }
@@ -42,7 +46,7 @@ public:
 
         ESP_LOGI(
             "HmbtecLight",
-            "Lichtblick finished -> keep breathing for 30 seconds"
+            "Lichtblick finished -> keep breathing for 60 seconds"
         );
 
         xTaskCreate(
@@ -50,7 +54,7 @@ public:
                 auto* self = static_cast<HmbtecLightController*>(arg);
 
                 // Keep the AI-selected breathing animation running.
-                vTaskDelay(pdMS_TO_TICKS(30000));
+                vTaskDelay(pdMS_TO_TICKS(60000));
 
                 ESP_LOGI(
                     "HmbtecLight",
@@ -205,6 +209,11 @@ public:
                 );
 
                 led_strip_->Breathe(low, high, 40);
+
+                // Inform the board that the Lichtblick light effect is now active.
+                if (effect_started_callback_) {
+                    effect_started_callback_();
+                }
 
                 return true;
             }
