@@ -176,6 +176,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_HMBTEC_LICHTBLICK_BREAD
         bool "HMB|TEC Lichtblick Bread Compact Wi-Fi"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_HMBTEC_DUALEYE
+        bool "HMB|TEC XiaoZhi DualEye GC9D01"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
         bool "Bread Compact Wi-Fi + LCD (面包板)"
         depends on IDF_TARGET_ESP32S3

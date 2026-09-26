@@ -60,9 +60,15 @@
 #define HMBTEC_PIXEL_RING_GPIO   GPIO_NUM_43   // TX -> 12x NeoPixel-Ring
 #define HMBTEC_PIXEL_RING_COUNT  12
 
-// IR Remote Control
-// GPIO_NUM_NC = IR-Empfang derzeit hardwareseitig deaktiviert
+//--- IR Remote Control
 #define HMBTEC_IR_RX_GPIO        GPIO_NUM_18   // TX -> IR receiver 
+//--- HEX/BCD-ModeSelect-RotarySwitch
+#define HMBTEC_PIO_HEXSW_1       GPIO_NUM_11  
+#define HMBTEC_PIO_HEXSW_2       GPIO_NUM_12  
+#define HMBTEC_PIO_HEXSW_4       GPIO_NUM_13  
+#define HMBTEC_PIO_HEXSW_8       GPIO_NUM_14  
+
 #define SEELSORGE_EN             1
+
 
 #endif // _BOARD_CONFIG_H_
