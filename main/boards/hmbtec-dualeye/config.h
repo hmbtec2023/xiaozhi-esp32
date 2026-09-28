@@ -14,11 +14,20 @@
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 // HMB | TEC DualEye: 0 = XiaoZhi baseline only, 1 = GC9D01 eyes enabled
 #define HMB_DUALEYE_ENABLED 1
-#define HMB_EYE_SCLK GPIO_NUM_11
-#define HMB_EYE_MOSI GPIO_NUM_12
-#define HMB_EYE_DC GPIO_NUM_13
-#define HMB_EYE_CS_LEFT GPIO_NUM_14
-#define HMB_EYE_CS_RIGHT GPIO_NUM_21 //18
-#define HMB_EYE_RST_LEFT GPIO_NUM_43
-#define HMB_EYE_RST_RIGHT GPIO_NUM_44
+#define HMB_EYE_SCLK GPIO_NUM_11 // grün
+#define HMB_EYE_MOSI GPIO_NUM_12 // blau
+#define HMB_EYE_DC GPIO_NUM_13 // weiß
+#define HMB_EYE_CS_LEFT GPIO_NUM_14 // orange
+#define HMB_EYE_CS_RIGHT GPIO_NUM_21 // gelb
+#define HMB_EYE_RST_LEFT GPIO_NUM_43    // TX braun
+#define HMB_EYE_RST_RIGHT GPIO_NUM_43 // TX violett
+
+#define HMBTEC_BUTTON_GPIO       GPIO_NUM_44   // RX -> Lichtblick-Taster
+
+// HMB | TEC Betriebsmodus: 0 = Lichtblick One-Shot, 1 = Seelsorge-Dialog
+#define SEELSORGE_EN             1
+
+//--- IR Remote Control ! hier nicht verwendet !
+//#define HMBTEC_IR_RX_GPIO        GPIO_NUM_18   // TX -> IR receiver 
+
 #endif

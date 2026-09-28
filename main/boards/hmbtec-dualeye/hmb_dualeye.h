@@ -1,5 +1,8 @@
 #pragma once
+
 #include "device_state.h"
+#include "button.h"
+
 class HmbDualEye {
 public:
     void Init();
