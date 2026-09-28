@@ -48,7 +48,7 @@ private:
         // --------------------------------------------------------------------
         // HMB | TEC Lichtblick Button
         //
-        // GPIO43 / Board-Label RX
+        // GPIO44 / Board-Label RX
         //
         // Short Press:
         //   Lichtblick One-Shot über HMBPROMPT
@@ -177,6 +177,61 @@ private:
         );
 #endif
 
+#if HMB_DUALEYE_ENABLED
+        // --------------------------------------------------------------------
+        // HMB | TEC AI Eye Expression
+        //
+        // Die KI setzt nur einen semantischen Ausdruck.
+        // Rendering, Bewegung, Blinzeln und Timeout laufen lokal im ESP32.
+        // --------------------------------------------------------------------
+
+        mcp_server.AddTool(
+            "self.hmbtec.eyes.set_expression",
+            "Set a temporary facial expression for the physical HMBTEC eyes. "
+            "Use this when a visible nonverbal reaction fits the conversation. "
+            "Allowed expression values: neutral, happy, relaxed, curious, thinking, surprised, sad, confused, sleepy. "
+            "Use subtle expressions and do not call the tool for every sentence. "
+            "duration_ms controls how long the expression remains active from 500 to 15000 milliseconds. "
+            "After the timeout the eyes automatically return to neutral behavior.",
+            PropertyList({
+                Property("expression", kPropertyTypeString),
+                Property("duration_ms", kPropertyTypeInteger, 500, 15000)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto expression=properties["expression"].value<std::string>();
+                int duration_ms=properties["duration_ms"].value<int>();
+
+                ESP_LOGI(
+                    TAG,
+                    "AI eye expression -> %s (%d ms)",
+                    expression.c_str(),
+                    duration_ms
+                );
+
+                return eyes_.SetExpression(expression,duration_ms);
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.hmbtec.eyes.look",
+            "Control the gaze direction of the physical HMBTEC eyes. "
+            "Use this tool when the user explicitly asks the eyes to look in a direction. "
+            "Allowed direction values: auto, center, left, right, up, down, up_left, up_right, down_left, down_right. "
+            "duration_ms controls how long the gaze is held from 500 to 15000 milliseconds. "
+            "After the timeout the eyes return to automatic gaze behavior.",
+            PropertyList({
+                Property("direction", kPropertyTypeString),
+                Property("duration_ms", kPropertyTypeInteger, 500, 15000)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto direction=properties["direction"].value<std::string>();
+                int duration_ms=properties["duration_ms"].value<int>();
+                ESP_LOGI(TAG,"AI eye look -> %s (%d ms)",direction.c_str(),duration_ms);
+                return eyes_.SetLook(direction,duration_ms);
+            }
+        );
+#endif
+
         ESP_LOGI(TAG, "HMBTEC MCP tools initialized");
     }
 
@@ -188,6 +243,25 @@ public:
     HmbDualEyeBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
         lichtblick_button_(HMBTEC_BUTTON_GPIO, false, 700){
+
+#if HMB_DUALEYE_ENABLED
+        display_.SetEmotionCallback([this](const char* emotion){
+            if(!emotion){
+                return;
+            }
+            std::string e(emotion);
+            if(e=="neutral") eyes_.ClearExpression();
+            else if(e=="happy") eyes_.SetExpression("happy",15000);
+            else if(e=="relaxed") eyes_.SetExpression("relaxed",15000);
+            else if(e=="sad") eyes_.SetExpression("sad",15000);
+            else if(e=="thinking") eyes_.SetExpression("thinking",15000);
+            else if(e=="surprised") eyes_.SetExpression("surprised",15000);
+            else if(e=="confused") eyes_.SetExpression("confused",15000);
+            else if(e=="sleepy") eyes_.SetExpression("sleepy",15000);
+            else eyes_.ClearExpression();
+            ESP_LOGI(TAG,"XiaoZhi emotion -> DualEye: %s",emotion);
+        });
+#endif
 
         InitializeButtons();
         InitializeTools();

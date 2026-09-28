@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 #include "application.h"
 #include "assets/lang_config.h"
 #include "audio_codec.h"
@@ -31,7 +32,15 @@ void Display::ShowNotification(const char* notification, int duration_ms) {
 
 void Display::UpdateStatusBar(bool update_all) {}
 
-void Display::SetEmotion(const char* emotion) { ESP_LOGW(TAG, "SetEmotion: %s", emotion); }
+void Display::SetEmotion(const char* emotion) {
+    ESP_LOGW(TAG, "SetEmotion: %s", emotion);
+    if(emotion_callback_){
+        emotion_callback_(emotion);
+    }
+}
+void Display::SetEmotionCallback(std::function<void(const char*)> callback) {
+    emotion_callback_=std::move(callback);
+}
 
 void Display::SetChatMessage(const char* role, const char* content) {
     ESP_LOGW(TAG, "Role:%s", role);
