@@ -5,6 +5,7 @@
 
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_random.h>
 #include <esp_timer.h>
@@ -19,268 +20,507 @@
 // HMB | TEC - XiaoZhi DualEye Engine
 // ============================================================================
 
-static const char* TAG = "HmbDualEye";
+static const char* TAG="HmbDualEye";
 
-// -----------------------------------------------------------------------------
+// ============================================================================
 // Display
-// -----------------------------------------------------------------------------
+// ============================================================================
 
-static constexpr int W = 160;
-static constexpr int H = 160;
-static constexpr int N = W * H;
+static constexpr int W=HMB_EYE_WIDTH;
+static constexpr int H=HMB_EYE_HEIGHT;
+static constexpr int N=W*H;
 
-// -----------------------------------------------------------------------------
+#if HMB_EYE_DISPLAY == HMB_EYE_GC9D01_160
+
+static constexpr int EYE_CX=80;
+static constexpr int EYE_CY=80;
+
+static constexpr int EYEBALL_RADIUS=74;
+
+static constexpr int IRIS_RADIUS_1=38;
+static constexpr int IRIS_RADIUS_2=31;
+static constexpr int IRIS_RADIUS_3=24;
+
+static constexpr int PUPIL_RADIUS=18;
+
+static constexpr int HIGHLIGHT1_X=-10;
+static constexpr int HIGHLIGHT1_Y=-11;
+static constexpr int HIGHLIGHT1_R=7;
+
+static constexpr int HIGHLIGHT2_X=9;
+static constexpr int HIGHLIGHT2_Y=8;
+static constexpr int HIGHLIGHT2_R=3;
+
+static constexpr float LOOK_X_MAX=23.0f;
+static constexpr float LOOK_Y_MAX=18.0f;
+
+static constexpr int BLINK_DEPTH=82;
+
+#elif HMB_EYE_DISPLAY == HMB_EYE_GC9A01_240
+
+static constexpr int EYE_CX=120;
+static constexpr int EYE_CY=120;
+
+static constexpr int EYEBALL_RADIUS=112;
+
+static constexpr int IRIS_RADIUS_1=57;
+static constexpr int IRIS_RADIUS_2=47;
+static constexpr int IRIS_RADIUS_3=36;
+
+static constexpr int PUPIL_RADIUS=27;
+
+static constexpr int HIGHLIGHT1_X=-15;
+static constexpr int HIGHLIGHT1_Y=-17;
+static constexpr int HIGHLIGHT1_R=10;
+
+static constexpr int HIGHLIGHT2_X=14;
+static constexpr int HIGHLIGHT2_Y=12;
+static constexpr int HIGHLIGHT2_R=5;
+
+static constexpr float LOOK_X_MAX=35.0f;
+static constexpr float LOOK_Y_MAX=27.0f;
+
+static constexpr int BLINK_DEPTH=123;
+
+#else
+
+#error "Unsupported HMB DualEye display"
+
+#endif
+
+// ============================================================================
 // Farben RGB565
-// -----------------------------------------------------------------------------
+// ============================================================================
 
-static constexpr uint16_t BLACK = 0x0000;
-static constexpr uint16_t WHITE = 0xFFFF;
+static constexpr uint16_t BLACK=0x0000;
+static constexpr uint16_t WHITE=0xFFFF;
 
-static constexpr uint16_t IRIS1 = 0x067F;
-static constexpr uint16_t IRIS2 = 0x04FC;
-static constexpr uint16_t IRIS3 = 0x0255;
+static constexpr uint16_t IRIS1=0x067F;
+static constexpr uint16_t IRIS2=0x04FC;
+static constexpr uint16_t IRIS3=0x0255;
 
-// -----------------------------------------------------------------------------
+// ============================================================================
 // Framebuffer / SPI
-// -----------------------------------------------------------------------------
+// ============================================================================
 
-static uint16_t fb[N];
+static uint16_t* fb=nullptr;
 
-static spi_device_handle_t devL = nullptr;
-static spi_device_handle_t devR = nullptr;
+static spi_device_handle_t devL=nullptr;
+static spi_device_handle_t devR=nullptr;
 
-// -----------------------------------------------------------------------------
+// ============================================================================
 // Eye State
-// -----------------------------------------------------------------------------
+// ============================================================================
 
-static volatile DeviceState eyeState = kDeviceStateIdle;
+static volatile DeviceState eyeState=kDeviceStateIdle;
 
-static float px = 0.0f;
-static float py = 0.0f;
+static float px=0.0f;
+static float py=0.0f;
 
-static float tx = 0.0f;
-static float ty = 0.0f;
+static float tx=0.0f;
+static float ty=0.0f;
 
-static float blink = 0.0f;
+static float blink=0.0f;
 
-static bool closing = false;
+static bool closing=false;
 
-static int64_t nextLook = 0;
-static int64_t nextBlink = 0;
+static int64_t nextLook=0;
+static int64_t nextBlink=0;
 
 // ============================================================================
 // SPI Low Level
 // ============================================================================
 
-static void txBytes(spi_device_handle_t d, const void* data, size_t len){
-    spi_transaction_t t = {};
-    t.length = len * 8;
-    t.tx_buffer = data;
-
-    ESP_ERROR_CHECK(spi_device_polling_transmit(d, &t));
+static void txBytes(spi_device_handle_t d,const void* data,size_t len){
+    spi_transaction_t t={};
+    t.length=len*8;
+    t.tx_buffer=data;
+    ESP_ERROR_CHECK(spi_device_polling_transmit(d,&t));
 }
 
-static void cmd(spi_device_handle_t d, uint8_t c){
-    gpio_set_level(HMB_EYE_DC, 0);
-    txBytes(d, &c, 1);
+static void cmd(spi_device_handle_t d,uint8_t c){
+    gpio_set_level(HMB_EYE_DC,0);
+    txBytes(d,&c,1);
 }
 
-static void data(spi_device_handle_t d, const void* p, size_t n){
-    gpio_set_level(HMB_EYE_DC, 1);
-    txBytes(d, p, n);
+static void data(spi_device_handle_t d,const void* p,size_t n){
+    gpio_set_level(HMB_EYE_DC,1);
+    txBytes(d,p,n);
 }
 
-static void cd(spi_device_handle_t d, uint8_t c, const uint8_t* p, size_t n){
-    cmd(d, c);
-
+static void cd(spi_device_handle_t d,uint8_t c,const uint8_t* p,size_t n){
+    cmd(d,c);
     if(n){
-        data(d, p, n);
+        data(d,p,n);
     }
+}
+
+static void write8(spi_device_handle_t d,uint8_t command,uint8_t value){
+    cd(d,command,&value,1);
 }
 
 // ============================================================================
 // GC9D01 Initialisierung
 // ============================================================================
 
-static void initPanel(spi_device_handle_t d){
-    cmd(d, 0xFE);
-    cmd(d, 0xEF);
+static void initGC9D01(spi_device_handle_t d){
+    cmd(d,0xFE);
+    cmd(d,0xEF);
 
-    for(uint8_t r = 0x80; r <= 0x8F; r++){
-        uint8_t v = 0xFF;
-        cd(d, r, &v, 1);
+    for(uint8_t r=0x80;r<=0x8F;r++){
+        uint8_t v=0xFF;
+        cd(d,r,&v,1);
     }
 
     uint8_t v;
 
-    v = 0x05;
-    cd(d, 0x3A, &v, 1);
+    v=0x05;
+    cd(d,0x3A,&v,1);
 
-    v = 0x01;
-    cd(d, 0xEC, &v, 1);
+    v=0x01;
+    cd(d,0xEC,&v,1);
 
-    const uint8_t a74[] = {
-        0x02, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00
+    const uint8_t a74[]={
+        0x02,0x0E,0x00,0x00,0x00,0x00,0x00
     };
-    cd(d, 0x74, a74, sizeof(a74));
+    cd(d,0x74,a74,sizeof(a74));
 
-    v = 0x3E;
-    cd(d, 0x98, &v, 1);
-    cd(d, 0x99, &v, 1);
+    v=0x3E;
+    cd(d,0x98,&v,1);
+    cd(d,0x99,&v,1);
 
-    const uint8_t b5[] = {
-        0x0D, 0x0D
+    const uint8_t b5[]={
+        0x0D,0x0D
     };
-    cd(d, 0xB5, b5, sizeof(b5));
+    cd(d,0xB5,b5,sizeof(b5));
 
-    const uint8_t a60[] = {
-        0x38, 0x0F, 0x79, 0x67
+    const uint8_t a60[]={
+        0x38,0x0F,0x79,0x67
     };
-    cd(d, 0x60, a60, sizeof(a60));
+    cd(d,0x60,a60,sizeof(a60));
 
-    const uint8_t a61[] = {
-        0x38, 0x11, 0x79, 0x67
+    const uint8_t a61[]={
+        0x38,0x11,0x79,0x67
     };
-    cd(d, 0x61, a61, sizeof(a61));
+    cd(d,0x61,a61,sizeof(a61));
 
-    const uint8_t a64[] = {
-        0x38, 0x17, 0x71, 0x5F, 0x79, 0x67
+    const uint8_t a64[]={
+        0x38,0x17,0x71,0x5F,0x79,0x67
     };
-    cd(d, 0x64, a64, sizeof(a64));
+    cd(d,0x64,a64,sizeof(a64));
 
-    const uint8_t a65[] = {
-        0x38, 0x13, 0x71, 0x5B, 0x79, 0x67
+    const uint8_t a65[]={
+        0x38,0x13,0x71,0x5B,0x79,0x67
     };
-    cd(d, 0x65, a65, sizeof(a65));
+    cd(d,0x65,a65,sizeof(a65));
 
-    const uint8_t a6a[] = {
-        0x00, 0x00
+    const uint8_t a6a[]={
+        0x00,0x00
     };
-    cd(d, 0x6A, a6a, sizeof(a6a));
+    cd(d,0x6A,a6a,sizeof(a6a));
 
-    const uint8_t a6c[] = {
-        0x22, 0x02, 0x22, 0x02, 0x22, 0x22, 0x50
+    const uint8_t a6c[]={
+        0x22,0x02,0x22,0x02,0x22,0x22,0x50
     };
-    cd(d, 0x6C, a6c, sizeof(a6c));
+    cd(d,0x6C,a6c,sizeof(a6c));
 
-    const uint8_t a6e[] = {
-        0x03, 0x03, 0x01, 0x01,
-        0x00, 0x00, 0x0F, 0x0F,
-        0x0D, 0x0D, 0x0B, 0x0B,
-        0x09, 0x09, 0x00, 0x00,
-        0x00, 0x00, 0x0A, 0x0A,
-        0x0C, 0x0C, 0x0E, 0x0E,
-        0x10, 0x10, 0x00, 0x00,
-        0x02, 0x02, 0x04, 0x04
+    const uint8_t a6e[]={
+        0x03,0x03,0x01,0x01,
+        0x00,0x00,0x0F,0x0F,
+        0x0D,0x0D,0x0B,0x0B,
+        0x09,0x09,0x00,0x00,
+        0x00,0x00,0x0A,0x0A,
+        0x0C,0x0C,0x0E,0x0E,
+        0x10,0x10,0x00,0x00,
+        0x02,0x02,0x04,0x04
     };
-    cd(d, 0x6E, a6e, sizeof(a6e));
+    cd(d,0x6E,a6e,sizeof(a6e));
 
-    v = 0x01;
-    cd(d, 0xBF, &v, 1);
+    v=0x01;
+    cd(d,0xBF,&v,1);
 
-    v = 0x40;
-    cd(d, 0xF9, &v, 1);
+    v=0x40;
+    cd(d,0xF9,&v,1);
 
-    v = 0x3B;
-    cd(d, 0x9B, &v, 1);
+    v=0x3B;
+    cd(d,0x9B,&v,1);
 
-    const uint8_t a93[] = {
-        0x33, 0x7F, 0x00
+    const uint8_t a93[]={
+        0x33,0x7F,0x00
     };
-    cd(d, 0x93, a93, sizeof(a93));
+    cd(d,0x93,a93,sizeof(a93));
 
-    v = 0x30;
-    cd(d, 0x7E, &v, 1);
+    v=0x30;
+    cd(d,0x7E,&v,1);
 
-    const uint8_t a70[] = {
-        0x0D, 0x02, 0x08,
-        0x0D, 0x02, 0x08
+    const uint8_t a70[]={
+        0x0D,0x02,0x08,
+        0x0D,0x02,0x08
     };
-    cd(d, 0x70, a70, sizeof(a70));
+    cd(d,0x70,a70,sizeof(a70));
 
-    const uint8_t a71[] = {
-        0x0D, 0x02, 0x08
+    const uint8_t a71[]={
+        0x0D,0x02,0x08
     };
-    cd(d, 0x71, a71, sizeof(a71));
+    cd(d,0x71,a71,sizeof(a71));
 
-    const uint8_t a91[] = {
-        0x0E, 0x09
+    const uint8_t a91[]={
+        0x0E,0x09
     };
-    cd(d, 0x91, a91, sizeof(a91));
+    cd(d,0x91,a91,sizeof(a91));
 
-    v = 0x19;
-    cd(d, 0xC3, &v, 1);
-    cd(d, 0xC4, &v, 1);
+    v=0x19;
+    cd(d,0xC3,&v,1);
+    cd(d,0xC4,&v,1);
 
-    v = 0x3C;
-    cd(d, 0xC9, &v, 1);
+    v=0x3C;
+    cd(d,0xC9,&v,1);
 
-    const uint8_t f0[] = {
-        0x53, 0x15, 0x0A, 0x04, 0x00, 0x3E
+    const uint8_t f0[]={
+        0x53,0x15,0x0A,0x04,0x00,0x3E
     };
-    cd(d, 0xF0, f0, sizeof(f0));
+    cd(d,0xF0,f0,sizeof(f0));
 
-    const uint8_t f2[] = {
-        0x53, 0x15, 0x0A, 0x04, 0x00, 0x3A
+    const uint8_t f2[]={
+        0x53,0x15,0x0A,0x04,0x00,0x3A
     };
-    cd(d, 0xF2, f2, sizeof(f2));
+    cd(d,0xF2,f2,sizeof(f2));
 
-    const uint8_t f1[] = {
-        0x56, 0xA8, 0x7F, 0x33, 0x34, 0x5F
+    const uint8_t f1[]={
+        0x56,0xA8,0x7F,0x33,0x34,0x5F
     };
-    cd(d, 0xF1, f1, sizeof(f1));
+    cd(d,0xF1,f1,sizeof(f1));
 
-    const uint8_t f3[] = {
-        0x52, 0xA4, 0x7F, 0x33, 0x34, 0xDF
+    const uint8_t f3[]={
+        0x52,0xA4,0x7F,0x33,0x34,0xDF
     };
-    cd(d, 0xF3, f3, sizeof(f3));
+    cd(d,0xF3,f3,sizeof(f3));
 
     // Display orientation
-    v = 0x60;
-    cd(d, 0x36, &v, 1);
+    v=0x60;
+    cd(d,0x36,&v,1);
 
     // Sleep Out
-    cmd(d, 0x11);
+    cmd(d,0x11);
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // Display On
-    cmd(d, 0x29);
+    cmd(d,0x29);
     vTaskDelay(pdMS_TO_TICKS(20));
+}
+
+// ============================================================================
+// GC9A01 Initialisierung
+// ============================================================================
+
+static void initGC9A01(spi_device_handle_t d){
+    // Software reset
+    cmd(d,0x01);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    cmd(d,0xEF);
+
+    write8(d,0xEB,0x14);
+
+    cmd(d,0xFE);
+    cmd(d,0xEF);
+
+    write8(d,0xEB,0x14);
+    write8(d,0x84,0x40);
+    write8(d,0x85,0xFF);
+    write8(d,0x86,0xFF);
+    write8(d,0x87,0xFF);
+    write8(d,0x88,0x0A);
+    write8(d,0x89,0x21);
+    write8(d,0x8A,0x00);
+    write8(d,0x8B,0x80);
+    write8(d,0x8C,0x01);
+    write8(d,0x8D,0x01);
+    write8(d,0x8E,0xFF);
+    write8(d,0x8F,0xFF);
+
+    const uint8_t b6[]={0x00,0x20};
+    cd(d,0xB6,b6,sizeof(b6));
+
+    // MADCTL
+    // 0x08 = BGR
+    write8(d,0x36,0x08);
+
+    // RGB565
+    write8(d,0x3A,0x05);
+
+    const uint8_t a90[]={0x08,0x08,0x08,0x08};
+    cd(d,0x90,a90,sizeof(a90));
+
+    write8(d,0xBD,0x06);
+    write8(d,0xBC,0x00);
+
+    const uint8_t ff[]={0x60,0x01,0x04};
+    cd(d,0xFF,ff,sizeof(ff));
+
+    write8(d,0xC3,0x13);
+    write8(d,0xC4,0x13);
+    write8(d,0xC9,0x22);
+
+    write8(d,0xBE,0x11);
+
+    const uint8_t e1[]={0x10,0x0E};
+    cd(d,0xE1,e1,sizeof(e1));
+
+    const uint8_t df[]={0x21,0x0C,0x02};
+    cd(d,0xDF,df,sizeof(df));
+
+    const uint8_t f0[]={
+        0x45,0x09,0x08,0x08,0x26,0x2A
+    };
+    cd(d,0xF0,f0,sizeof(f0));
+
+    const uint8_t f1[]={
+        0x43,0x70,0x72,0x36,0x37,0x6F
+    };
+    cd(d,0xF1,f1,sizeof(f1));
+
+    const uint8_t f2[]={
+        0x45,0x09,0x08,0x08,0x26,0x2A
+    };
+    cd(d,0xF2,f2,sizeof(f2));
+
+    const uint8_t f3[]={
+        0x43,0x70,0x72,0x36,0x37,0x6F
+    };
+    cd(d,0xF3,f3,sizeof(f3));
+
+    const uint8_t ed[]={
+        0x1B,0x0B
+    };
+    cd(d,0xED,ed,sizeof(ed));
+
+    write8(d,0xAE,0x77);
+
+    write8(d,0xCD,0x63);
+
+    const uint8_t a70[]={
+        0x07,0x07,0x04,0x0E,
+        0x0F,0x09,0x07,0x08,
+        0x03
+    };
+    cd(d,0x70,a70,sizeof(a70));
+
+    write8(d,0xE8,0x34);
+
+    const uint8_t a62[]={
+        0x18,0x0D,0x71,0xED,
+        0x70,0x70,0x18,0x0F,
+        0x71,0xEF,0x70,0x70
+    };
+    cd(d,0x62,a62,sizeof(a62));
+
+    const uint8_t a63[]={
+        0x18,0x11,0x71,0xF1,
+        0x70,0x70,0x18,0x13,
+        0x71,0xF3,0x70,0x70
+    };
+    cd(d,0x63,a63,sizeof(a63));
+
+    const uint8_t a64[]={
+        0x28,0x29,0xF1,0x01,
+        0xF1,0x00,0x07
+    };
+    cd(d,0x64,a64,sizeof(a64));
+
+    const uint8_t a66[]={
+        0x3C,0x00,0xCD,0x67,
+        0x45,0x45,0x10,0x00,
+        0x00,0x00
+    };
+    cd(d,0x66,a66,sizeof(a66));
+
+    const uint8_t a67[]={
+        0x00,0x3C,0x00,0x00,
+        0x00,0x01,0x54,0x10,
+        0x32,0x98
+    };
+    cd(d,0x67,a67,sizeof(a67));
+
+    const uint8_t a74[]={
+        0x10,0x85,0x80,0x00,
+        0x00,0x4E,0x00
+    };
+    cd(d,0x74,a74,sizeof(a74));
+
+    const uint8_t a98[]={
+        0x3E,0x07
+    };
+    cd(d,0x98,a98,sizeof(a98));
+
+    // Tearing effect off
+    cmd(d,0x34);
+
+    // Display inversion on
+    cmd(d,0x21);
+
+    // Sleep Out
+    cmd(d,0x11);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // Display On
+    cmd(d,0x29);
+    vTaskDelay(pdMS_TO_TICKS(20));
+}
+
+// ============================================================================
+// Display Controller auswählen
+// ============================================================================
+
+static void initPanel(spi_device_handle_t d){
+#if HMB_EYE_DISPLAY == HMB_EYE_GC9D01_160
+    ESP_LOGI(TAG,"Initializing GC9D01 160x160");
+    initGC9D01(d);
+#elif HMB_EYE_DISPLAY == HMB_EYE_GC9A01_240
+    ESP_LOGI(TAG,"Initializing GC9A01 240x240");
+    initGC9A01(d);
+#endif
 }
 
 // ============================================================================
 // Primitive Grafikfunktionen
 // ============================================================================
 
-static void hline(int x, int y, int w, uint16_t c){
-    if(y < 0 || y >= H || w <= 0){
+static void hline(int x,int y,int w,uint16_t c){
+    if(y<0 || y>=H || w<=0){
         return;
     }
 
-    if(x < 0){
-        w += x;
-        x = 0;
+    if(x<0){
+        w+=x;
+        x=0;
     }
 
-    if(x + w > W){
-        w = W - x;
+    if(x+w>W){
+        w=W-x;
     }
 
-    if(w <= 0){
+    if(w<=0){
         return;
     }
 
-    for(int i = 0; i < w; i++){
-        fb[y * W + x + i] = c;
+    for(int i=0;i<w;i++){
+        fb[y*W+x+i]=c;
     }
 }
 
-static void circle(int cx, int cy, int r, uint16_t c){
-    int r2 = r * r;
+static void circle(int cx,int cy,int r,uint16_t c){
+    int r2=r*r;
 
-    for(int y = -r; y <= r; y++){
-        int x = (int)sqrtf((float)(r2 - y * y));
-        hline(cx - x, cy + y, x * 2 + 1, c);
+    for(int y=-r;y<=r;y++){
+        int yy=r2-y*y;
+
+        if(yy<0){
+            continue;
+        }
+
+        int x=(int)sqrtf((float)yy);
+        hline(cx-x,cy+y,x*2+1,c);
     }
 }
 
@@ -289,35 +529,47 @@ static void circle(int cx, int cy, int r, uint16_t c){
 // ============================================================================
 
 static void render(){
-    std::fill_n(fb, N, BLACK);
+    std::fill_n(fb,N,BLACK);
 
     // Augapfel
-    circle(80, 80, 74, WHITE);
+    circle(EYE_CX,EYE_CY,EYEBALL_RADIUS,WHITE);
 
     // Irisposition
-    int ix = 80 + (int)px;
-    int iy = 80 + (int)py;
+    int ix=EYE_CX+(int)px;
+    int iy=EYE_CY+(int)py;
 
     // Iris
-    circle(ix, iy, 38, IRIS1);
-    circle(ix, iy, 31, IRIS2);
-    circle(ix, iy, 24, IRIS3);
+    circle(ix,iy,IRIS_RADIUS_1,IRIS1);
+    circle(ix,iy,IRIS_RADIUS_2,IRIS2);
+    circle(ix,iy,IRIS_RADIUS_3,IRIS3);
 
     // Pupille
-    circle(ix, iy, 18, BLACK);
+    circle(ix,iy,PUPIL_RADIUS,BLACK);
 
     // Lichtreflexe
-    circle(ix - 10, iy - 11, 7, WHITE);
-    circle(ix + 9, iy + 8, 3, WHITE);
+    circle(
+        ix+HIGHLIGHT1_X,
+        iy+HIGHLIGHT1_Y,
+        HIGHLIGHT1_R,
+        WHITE
+    );
+
+    circle(
+        ix+HIGHLIGHT2_X,
+        iy+HIGHLIGHT2_Y,
+        HIGHLIGHT2_R,
+        WHITE
+    );
 
     // Augenlider / Blinzeln
-    int lid = (int)(82.0f * blink);
+    int lid=(int)((float)BLINK_DEPTH*blink);
 
-    for(int y = 0; y < lid; y++){
-        int in = (int)(10.0f * (1.0f - y / 82.0f));
+    for(int y=0;y<lid;y++){
+        float f=1.0f-(float)y/(float)BLINK_DEPTH;
+        int in=(int)((float)W*0.0625f*f);
 
-        hline(in, y, W - in * 2, BLACK);
-        hline(in, H - 1 - y, W - in * 2, BLACK);
+        hline(in,y,W-in*2,BLACK);
+        hline(in,H-1-y,W-in*2,BLACK);
     }
 }
 
@@ -326,32 +578,41 @@ static void render(){
 // ============================================================================
 
 static void push(spi_device_handle_t d){
-    const uint8_t col[] = {
-        0x00, 0x00, 0x00, 0x9F
+    uint16_t xEnd=W-1;
+    uint16_t yEnd=H-1;
+
+    const uint8_t col[]={
+        0x00,
+        0x00,
+        (uint8_t)(xEnd>>8),
+        (uint8_t)(xEnd&0xFF)
     };
 
-    const uint8_t row[] = {
-        0x00, 0x00, 0x00, 0x9F
+    const uint8_t row[]={
+        0x00,
+        0x00,
+        (uint8_t)(yEnd>>8),
+        (uint8_t)(yEnd&0xFF)
     };
 
-    cd(d, 0x2A, col, sizeof(col));
-    cd(d, 0x2B, row, sizeof(row));
+    cd(d,0x2A,col,sizeof(col));
+    cd(d,0x2B,row,sizeof(row));
 
-    cmd(d, 0x2C);
+    cmd(d,0x2C);
 
-    gpio_set_level(HMB_EYE_DC, 1);
+    gpio_set_level(HMB_EYE_DC,1);
 
-    static uint8_t line[W * 2];
+    static uint8_t line[W*2];
 
-    for(int y = 0; y < H; y++){
-        for(int x = 0; x < W; x++){
-            uint16_t c = fb[y * W + x];
+    for(int y=0;y<H;y++){
+        for(int x=0;x<W;x++){
+            uint16_t c=fb[y*W+x];
 
-            line[x * 2] = c >> 8;
-            line[x * 2 + 1] = c & 0xFF;
+            line[x*2]=(uint8_t)(c>>8);
+            line[x*2+1]=(uint8_t)(c&0xFF);
         }
 
-        txBytes(d, line, sizeof(line));
+        txBytes(d,line,sizeof(line));
     }
 }
 
@@ -364,9 +625,9 @@ static void push(spi_device_handle_t d){
 // Sonst kann bei negativen Sollwerten ein unsigned Unterlauf entstehen.
 // ============================================================================
 
-static int randomSigned(int minimum, int maximum){
-    uint32_t range = (uint32_t)(maximum - minimum + 1);
-    return (int)(esp_random() % range) + minimum;
+static int randomSigned(int minimum,int maximum){
+    uint32_t range=(uint32_t)(maximum-minimum+1);
+    return (int)(esp_random()%range)+minimum;
 }
 
 // ============================================================================
@@ -374,91 +635,99 @@ static int randomSigned(int minimum, int maximum){
 // ============================================================================
 
 static void task(void*){
-    nextLook = esp_timer_get_time() / 1000 + 800;
-    nextBlink = esp_timer_get_time() / 1000 + 3000;
+    nextLook=esp_timer_get_time()/1000+800;
+    nextBlink=esp_timer_get_time()/1000+3000;
 
     while(true){
-        int64_t now = esp_timer_get_time() / 1000;
-        DeviceState s = eyeState;
+        int64_t now=esp_timer_get_time()/1000;
+        DeviceState s=eyeState;
 
         // ---------------------------------------------------------------------
         // XiaoZhi State -> Blickverhalten
         // ---------------------------------------------------------------------
 
-        if(s == kDeviceStateListening){
+        if(s==kDeviceStateListening){
             // Beim Zuhören Benutzer ansehen
-            tx = 0.0f;
-            ty = 0.0f;
+            tx=0.0f;
+            ty=0.0f;
         }
         else if(
-            s == kDeviceStateConnecting ||
-            s == kDeviceStateWifiConfiguring
+            s==kDeviceStateConnecting ||
+            s==kDeviceStateWifiConfiguring
         ){
             // Suchende, etwas schnellere Augenbewegung
-            if(now >= nextLook){
-                tx = (float)randomSigned(-23, 23);
-                ty = (float)randomSigned(-10, 10);
+            if(now>=nextLook){
+                int lookX=(int)LOOK_X_MAX;
+                int lookY=(int)(LOOK_Y_MAX*0.55f);
 
-                nextLook = now + 500;
+                tx=(float)randomSigned(-lookX,lookX);
+                ty=(float)randomSigned(-lookY,lookY);
+
+                nextLook=now+500;
             }
         }
-        else if(s == kDeviceStateSpeaking){
+        else if(s==kDeviceStateSpeaking){
             // Kleine lebendige Bewegungen während der Sprachausgabe
-            if(now >= nextLook){
-                tx = (float)randomSigned(-15, 15);
-                ty = (float)randomSigned(-10, 10);
+            if(now>=nextLook){
+                int lookX=(int)(LOOK_X_MAX*0.65f);
+                int lookY=(int)(LOOK_Y_MAX*0.55f);
 
-                nextLook = now + 700;
+                tx=(float)randomSigned(-lookX,lookX);
+                ty=(float)randomSigned(-lookY,lookY);
+
+                nextLook=now+700;
             }
         }
-        else if(now >= nextLook){
+        else if(now>=nextLook){
             // Normaler Idle-Blick
-            tx = (float)randomSigned(-23, 23);
-            ty = (float)randomSigned(-18, 18);
+            int lookX=(int)LOOK_X_MAX;
+            int lookY=(int)LOOK_Y_MAX;
 
-            nextLook =
-                now +
-                800 +
-                (int64_t)(esp_random() % 1800);
+            tx=(float)randomSigned(-lookX,lookX);
+            ty=(float)randomSigned(-lookY,lookY);
+
+            nextLook=
+                now+
+                800+
+                (int64_t)(esp_random()%1800);
         }
 
         // ---------------------------------------------------------------------
         // Weiche Augenbewegung
         // ---------------------------------------------------------------------
 
-        px += (tx - px) * 0.18f;
-        py += (ty - py) * 0.18f;
+        px+=(tx-px)*0.18f;
+        py+=(ty-py)*0.18f;
 
-        // Zusätzliche Sicherheitsbegrenzung
-        px = std::max(-23.0f, std::min(23.0f, px));
-        py = std::max(-18.0f, std::min(18.0f, py));
+        px=std::max(-LOOK_X_MAX,std::min(LOOK_X_MAX,px));
+        py=std::max(-LOOK_Y_MAX,std::min(LOOK_Y_MAX,py));
 
         // ---------------------------------------------------------------------
         // Automatisches Blinzeln
         // ---------------------------------------------------------------------
 
-        if(now >= nextBlink && !closing && blink <= 0.0f){
-            closing = true;
+        if(now>=nextBlink && !closing && blink<=0.0f){
+            closing=true;
 
-            nextBlink =
-                now +
-                2500 +
-                (int64_t)(esp_random() % 3500);
+            nextBlink=
+                now+
+                2500+
+                (int64_t)(esp_random()%3500);
         }
 
         if(closing){
-            blink += 0.32f;
+            blink+=0.32f;
 
-            if(blink >= 1.0f){
-                blink = 1.0f;
-                closing = false;
+            if(blink>=1.0f){
+                blink=1.0f;
+                closing=false;
             }
         }
-        else if(blink > 0.0f){
-            blink -= 0.24f;
+        else if(blink>0.0f){
+            blink-=0.24f;
 
-            if(blink < 0.0f){
-                blink = 0.0f;
+            if(blink<0.0f){
+                blink=0.0f;
             }
         }
 
@@ -480,20 +749,54 @@ static void task(void*){
 // ============================================================================
 
 void HmbDualEye::Init(){
-    ESP_LOGI(TAG, "Initializing HMBTEC DualEye");
+    ESP_LOGI(TAG,"Initializing HMBTEC DualEye");
+
+#if HMB_EYE_DISPLAY == HMB_EYE_GC9D01_160
+    ESP_LOGI(TAG,"Display: GC9D01 160x160");
+#elif HMB_EYE_DISPLAY == HMB_EYE_GC9A01_240
+    ESP_LOGI(TAG,"Display: GC9A01 240x240");
+#endif
+
+    ESP_LOGI(
+        TAG,
+        "Framebuffer: %dx%d = %u bytes",
+        W,
+        H,
+        (unsigned)(N*sizeof(uint16_t))
+    );
+
+    // -------------------------------------------------------------------------
+    // Framebuffer in PSRAM
+    // -------------------------------------------------------------------------
+
+    fb=(uint16_t*)heap_caps_malloc(
+        N*sizeof(uint16_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+
+    if(!fb){
+        ESP_LOGE(
+            TAG,
+            "Could not allocate DualEye framebuffer: %u bytes",
+            (unsigned)(N*sizeof(uint16_t))
+        );
+        return;
+    }
+
+    std::memset(fb,0,N*sizeof(uint16_t));
 
     // -------------------------------------------------------------------------
     // GPIO
     // -------------------------------------------------------------------------
 
-    gpio_config_t g = {};
+    gpio_config_t g={};
 
-    g.pin_bit_mask =
-        (1ULL << HMB_EYE_DC) |
-        (1ULL << HMB_EYE_RST_LEFT) |
-        (1ULL << HMB_EYE_RST_RIGHT);
+    g.pin_bit_mask=
+        (1ULL<<HMB_EYE_DC) |
+        (1ULL<<HMB_EYE_RST_LEFT) |
+        (1ULL<<HMB_EYE_RST_RIGHT);
 
-    g.mode = GPIO_MODE_OUTPUT;
+    g.mode=GPIO_MODE_OUTPUT;
 
     ESP_ERROR_CHECK(gpio_config(&g));
 
@@ -501,13 +804,13 @@ void HmbDualEye::Init(){
     // Beide Displays resetten
     // -------------------------------------------------------------------------
 
-    gpio_set_level(HMB_EYE_RST_LEFT, 0);
-    gpio_set_level(HMB_EYE_RST_RIGHT, 0);
+    gpio_set_level(HMB_EYE_RST_LEFT,0);
+    gpio_set_level(HMB_EYE_RST_RIGHT,0);
 
     vTaskDelay(pdMS_TO_TICKS(30));
 
-    gpio_set_level(HMB_EYE_RST_LEFT, 1);
-    gpio_set_level(HMB_EYE_RST_RIGHT, 1);
+    gpio_set_level(HMB_EYE_RST_LEFT,1);
+    gpio_set_level(HMB_EYE_RST_RIGHT,1);
 
     vTaskDelay(pdMS_TO_TICKS(150));
 
@@ -515,14 +818,14 @@ void HmbDualEye::Init(){
     // SPI Bus
     // -------------------------------------------------------------------------
 
-    spi_bus_config_t bus = {};
+    spi_bus_config_t bus={};
 
-    bus.mosi_io_num = HMB_EYE_MOSI;
-    bus.miso_io_num = -1;
-    bus.sclk_io_num = HMB_EYE_SCLK;
-    bus.quadwp_io_num = -1;
-    bus.quadhd_io_num = -1;
-    bus.max_transfer_sz = W * 2;
+    bus.mosi_io_num=HMB_EYE_MOSI;
+    bus.miso_io_num=-1;
+    bus.sclk_io_num=HMB_EYE_SCLK;
+    bus.quadwp_io_num=-1;
+    bus.quadhd_io_num=-1;
+    bus.max_transfer_sz=W*2;
 
     ESP_ERROR_CHECK(
         spi_bus_initialize(
@@ -536,12 +839,12 @@ void HmbDualEye::Init(){
     // Linkes Display
     // -------------------------------------------------------------------------
 
-    spi_device_interface_config_t di = {};
+    spi_device_interface_config_t di={};
 
-    di.clock_speed_hz = 20000000;
-    di.mode = 0;
-    di.spics_io_num = HMB_EYE_CS_LEFT;
-    di.queue_size = 1;
+    di.clock_speed_hz=20000000;
+    di.mode=0;
+    di.spics_io_num=HMB_EYE_CS_LEFT;
+    di.queue_size=1;
 
     ESP_ERROR_CHECK(
         spi_bus_add_device(
@@ -555,7 +858,7 @@ void HmbDualEye::Init(){
     // Rechtes Display
     // -------------------------------------------------------------------------
 
-    di.spics_io_num = HMB_EYE_CS_RIGHT;
+    di.spics_io_num=HMB_EYE_CS_RIGHT;
 
     ESP_ERROR_CHECK(
         spi_bus_add_device(
@@ -566,7 +869,7 @@ void HmbDualEye::Init(){
     );
 
     // -------------------------------------------------------------------------
-    // GC9D01 initialisieren
+    // Displaycontroller initialisieren
     // -------------------------------------------------------------------------
 
     initPanel(devL);
@@ -576,7 +879,7 @@ void HmbDualEye::Init(){
     // Eye Task starten
     // -------------------------------------------------------------------------
 
-    BaseType_t result = xTaskCreate(
+    BaseType_t result=xTaskCreate(
         task,
         "hmb_eye",
         6144,
@@ -585,17 +888,21 @@ void HmbDualEye::Init(){
         nullptr
     );
 
-    if(result != pdPASS){
-        ESP_LOGE(TAG, "Could not create DualEye task");
+    if(result!=pdPASS){
+        ESP_LOGE(TAG,"Could not create DualEye task");
+
+        heap_caps_free(fb);
+        fb=nullptr;
+
         return;
     }
 
-    ESP_LOGI(TAG, "DualEye ready");
+    ESP_LOGI(TAG,"DualEye ready");
 }
 
 void HmbDualEye::SetState(DeviceState state){
-    state_ = state;
-    eyeState = state;
+    state_=state;
+    eyeState=state;
 }
 
 #else
@@ -608,7 +915,7 @@ void HmbDualEye::Init(){
 }
 
 void HmbDualEye::SetState(DeviceState state){
-    state_ = state;
+    state_=state;
 }
 
 #endif
