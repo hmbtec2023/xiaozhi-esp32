@@ -16,11 +16,10 @@ python3 scripts/build.py hmbtec/hmbtec-spotpear-128 --language de-DE
 
 ffmpeg -i test1.mp3 -ac 1 -ar 24000 -c:a libopus -b:a 24k -frame_duration 20 test1.ogg
 
-mkdir -p ~/Desktop/XIAOZHI_AUDIO
-for f in ~/Desktop/MP3/*.mp3; do
-  ffmpeg -i "$f" -ac 1 -ar 24000 -c:a libopus -b:a 24k -vbr on -compression_level 10 -frame_duration 20 \
-  ~/Desktop/XIAOZHI_AUDIO/"$(basename "${f%.*}").ogg"
-done
+========================================
+ HMB | TEC - XiaoZhi Audio Converter
+========================================
+cd "$HOME/Desktop/OGG_Soundfiles" && mkdir -p audio && for f in *.mp3; do [ -e "$f" ] || continue; echo "Konvertiere: $f"; ffmpeg -y -i "$f" -ac 1 -ar 24000 -c:a libopus -b:a 24k -vbr on -compression_level 10 -frame_duration 20 "audio/${f%.mp3}.ogg"; done
 
 ----
 

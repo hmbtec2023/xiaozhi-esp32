@@ -54,6 +54,12 @@
 
 #define DISPLAY_SPI_SCLK_HZ     (40 * 1000 * 1000)
 
+// HMB|TEC SingleEye - GC9A01 240x240
+#define HMB_SINGLE_EYE_ENABLED 1
+#define HMB_EYE_IRIS_BLUE 0
+#define HMB_EYE_IRIS_BROWN 1
+#define HMB_EYE_IRIS_COLOR HMB_EYE_IRIS_BLUE
+
 // 电量检测相关引脚定义
 #define BATTERY_ADC_PIN         GPIO_NUM_1  // 电池电压检测ADC引脚
 #define BATTERY_CHARGING_PIN    GPIO_NUM_41 // 充电状态检测引脚

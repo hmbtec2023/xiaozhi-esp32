@@ -17,6 +17,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include <esp_timer.h>
+#include <esp_random.h>
 #include "i2c_device.h"
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -114,32 +115,314 @@ private:
 
 
 class CustomLcdDisplay : public SpiLcdDisplay {
+private:
+    lv_obj_t* eye_root_=nullptr;
+    lv_obj_t* eye_white_=nullptr;
+    lv_obj_t* iris_outer_=nullptr;
+    lv_obj_t* iris_mid_=nullptr;
+    lv_obj_t* iris_inner_=nullptr;
+    lv_obj_t* pupil_=nullptr;
+    lv_obj_t* highlight_big_=nullptr;
+    lv_obj_t* highlight_small_=nullptr;
+    lv_obj_t* lid_top_=nullptr;
+    lv_obj_t* lid_bottom_=nullptr;
+    lv_timer_t* eye_timer_=nullptr;
+    float eye_x_=0.0f;
+    float eye_y_=0.0f;
+    float target_x_=0.0f;
+    float target_y_=0.0f;
+    float blink_=0.0f;
+    bool blink_closing_=false;
+    bool double_blink_pending_=false;
+    int64_t next_look_ms_=0;
+    int64_t next_blink_ms_=0;
+
+    static constexpr int EYE_CX=120;
+    static constexpr int EYE_CY=130;
+    static constexpr int EYE_DIAMETER=218;
+    static constexpr int IRIS_OUTER=112;
+    static constexpr int IRIS_MID=92;
+    static constexpr int IRIS_INNER=70;
+    static constexpr int PUPIL=52;
+    static constexpr int LOOK_X=30;
+    static constexpr int LOOK_Y=21;
+    static constexpr int LID_MAX=105;
+
+    static void SetCircle(lv_obj_t* obj,int size,lv_color_t color){
+        if(!obj) return;
+        lv_obj_set_size(obj,size,size);
+        lv_obj_set_style_radius(obj,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(obj,color,0);
+        lv_obj_set_style_bg_opa(obj,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(obj,0,0);
+        lv_obj_set_style_pad_all(obj,0,0);
+        lv_obj_clear_flag(obj,LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    void PositionEye(){
+        if(!iris_outer_ || !iris_mid_ || !iris_inner_ || !pupil_ ||
+           !highlight_big_ || !highlight_small_) return;
+
+        int x=EYE_CX+(int)eye_x_;
+        int y=EYE_CY+(int)eye_y_;
+
+        lv_obj_set_pos(iris_outer_,x-IRIS_OUTER/2,y-IRIS_OUTER/2);
+        lv_obj_set_pos(iris_mid_,x-IRIS_MID/2,y-IRIS_MID/2);
+        lv_obj_set_pos(iris_inner_,x-IRIS_INNER/2,y-IRIS_INNER/2);
+        lv_obj_set_pos(pupil_,x-PUPIL/2,y-PUPIL/2);
+        lv_obj_set_pos(highlight_big_,x-23,y-25);
+        lv_obj_set_pos(highlight_small_,x+14,y+11);
+    }
+
+    void UpdateLids(){
+        if(!lid_top_ || !lid_bottom_) return;
+
+        int lid=(int)(LID_MAX*blink_);
+        lv_obj_set_height(lid_top_,24+lid);
+        lv_obj_set_height(lid_bottom_,20+lid);
+    }
+
+    void Animate(){
+        if(!eye_root_) return;
+
+        int64_t now=esp_timer_get_time()/1000;
+        DeviceState state=Application::GetInstance().GetDeviceState();
+
+        if(now>=next_look_ms_){
+            if(state==kDeviceStateListening){
+                target_x_=0.0f;
+                target_y_=0.0f;
+                next_look_ms_=now+900;
+            }else if(state==kDeviceStateSpeaking){
+                target_x_=(float)((int)(esp_random()%41)-20);
+                target_y_=(float)((int)(esp_random()%25)-12);
+                next_look_ms_=now+650+(esp_random()%550);
+            }else{
+                target_x_=(float)((int)(esp_random()%(LOOK_X*2+1))-LOOK_X);
+                target_y_=(float)((int)(esp_random()%(LOOK_Y*2+1))-LOOK_Y);
+                next_look_ms_=now+900+(esp_random()%2200);
+            }
+        }
+
+        eye_x_+=(target_x_-eye_x_)*0.16f;
+        eye_y_+=(target_y_-eye_y_)*0.16f;
+        PositionEye();
+
+        if(now>=next_blink_ms_ && !blink_closing_ && blink_<=0.0f){
+            blink_closing_=true;
+            double_blink_pending_=(esp_random()%8)==0;
+        }
+
+        if(blink_closing_){
+            blink_+=0.34f;
+
+            if(blink_>=1.0f){
+                blink_=1.0f;
+                blink_closing_=false;
+            }
+        }else if(blink_>0.0f){
+            blink_-=0.26f;
+
+            if(blink_<=0.0f){
+                blink_=0.0f;
+
+                if(double_blink_pending_){
+                    double_blink_pending_=false;
+                    next_blink_ms_=now+170;
+                }else{
+                    next_blink_ms_=now+2800+(esp_random()%4200);
+                }
+            }
+        }
+
+        UpdateLids();
+    }
+
+    static void EyeTimerCallback(lv_timer_t* timer){
+        auto* self=static_cast<CustomLcdDisplay*>(lv_timer_get_user_data(timer));
+        if(self) self->Animate();
+    }
+
+    static void SetupEyeAsync(void* user_data){
+        auto* self=static_cast<CustomLcdDisplay*>(user_data);
+        if(self) self->SetupEye();
+    }
+
+    void SetupEye(){
+        if(eye_root_){
+            ESP_LOGW(TAG,"SetupEye ignored: eye already initialized");
+            return;
+        }
+
+        ESP_LOGI(TAG,"SetupEye start");
+
+        lv_obj_t* screen=lv_screen_active();
+        if(!screen){
+            ESP_LOGE(TAG,"SetupEye failed: no active LVGL screen");
+            return;
+        }
+
+        // ---------------------------------------------------------------------
+        // HMB | TEC SingleEye root layer
+        // ---------------------------------------------------------------------
+        // Die originale XiaoZhi-Oberflaeche wird nicht veraendert.
+        // Das Auge liegt als eigene schwarze Ebene darueber.
+        eye_root_=lv_obj_create(screen);
+        if(!eye_root_){
+            ESP_LOGE(TAG,"SetupEye failed: eye_root creation failed");
+            return;
+        }
+
+        lv_obj_set_size(eye_root_,240,240);
+        lv_obj_set_pos(eye_root_,0,0);
+        lv_obj_set_style_bg_color(eye_root_,lv_color_black(),0);
+        lv_obj_set_style_bg_opa(eye_root_,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(eye_root_,0,0);
+        lv_obj_set_style_pad_all(eye_root_,0,0);
+        lv_obj_set_style_radius(eye_root_,0,0);
+        lv_obj_clear_flag(eye_root_,LV_OBJ_FLAG_SCROLLABLE);
+
+        // ---------------------------------------------------------------------
+        // Eye white
+        // ---------------------------------------------------------------------
+        eye_white_=lv_obj_create(eye_root_);
+        SetCircle(eye_white_,EYE_DIAMETER,lv_color_white());
+        lv_obj_set_pos(
+            eye_white_,
+            EYE_CX-EYE_DIAMETER/2,
+            EYE_CY-EYE_DIAMETER/2
+        );
+
+        // ---------------------------------------------------------------------
+        // Iris colors
+        // ---------------------------------------------------------------------
+#if HMB_EYE_IRIS_COLOR == HMB_EYE_IRIS_BROWN
+        const lv_color_t iris1=lv_color_hex(0x9A6538);
+        const lv_color_t iris2=lv_color_hex(0x70431F);
+        const lv_color_t iris3=lv_color_hex(0xB6814E);
+#else
+        const lv_color_t iris1=lv_color_hex(0x2388C7);
+        const lv_color_t iris2=lv_color_hex(0x12649B);
+        const lv_color_t iris3=lv_color_hex(0x55B8E8);
+#endif
+
+        // ---------------------------------------------------------------------
+        // Iris / pupil / highlights
+        // ---------------------------------------------------------------------
+        iris_outer_=lv_obj_create(eye_root_);
+        iris_mid_=lv_obj_create(eye_root_);
+        iris_inner_=lv_obj_create(eye_root_);
+        pupil_=lv_obj_create(eye_root_);
+        highlight_big_=lv_obj_create(eye_root_);
+        highlight_small_=lv_obj_create(eye_root_);
+
+        SetCircle(iris_outer_,IRIS_OUTER,iris1);
+        SetCircle(iris_mid_,IRIS_MID,iris2);
+        SetCircle(iris_inner_,IRIS_INNER,iris3);
+        SetCircle(pupil_,PUPIL,lv_color_black());
+        SetCircle(highlight_big_,18,lv_color_white());
+        SetCircle(highlight_small_,8,lv_color_white());
+
+        PositionEye();
+
+        // ---------------------------------------------------------------------
+        // Eyelids
+        // ---------------------------------------------------------------------
+        lid_top_=lv_obj_create(eye_root_);
+        lid_bottom_=lv_obj_create(eye_root_);
+
+        for(auto* lid:{lid_top_,lid_bottom_}){
+            lv_obj_set_width(lid,240);
+            lv_obj_set_style_bg_color(lid,lv_color_black(),0);
+            lv_obj_set_style_bg_opa(lid,LV_OPA_COVER,0);
+            lv_obj_set_style_border_width(lid,0,0);
+            lv_obj_set_style_pad_all(lid,0,0);
+            lv_obj_set_style_radius(lid,70,0);
+            lv_obj_clear_flag(lid,LV_OBJ_FLAG_SCROLLABLE);
+        }
+
+        lv_obj_align(lid_top_,LV_ALIGN_TOP_MID,0,-34);
+        lv_obj_align(lid_bottom_,LV_ALIGN_BOTTOM_MID,0,34);
+
+        UpdateLids();
+
+        // ---------------------------------------------------------------------
+        // XiaoZhi status bar remains visible above eye
+        // ---------------------------------------------------------------------
+        if(status_bar_){
+            lv_obj_move_foreground(status_bar_);
+        }
+
+        if(status_label_){
+            lv_obj_set_style_text_color(status_label_,lv_color_white(),0);
+        }
+
+        // ---------------------------------------------------------------------
+        // Animation
+        // ---------------------------------------------------------------------
+        int64_t now=esp_timer_get_time()/1000;
+        next_look_ms_=now+700;
+        next_blink_ms_=now+2200;
+
+        if(!eye_timer_){
+            eye_timer_=lv_timer_create(EyeTimerCallback,45,this);
+        }
+
+        ESP_LOGI(TAG,"SetupEye complete");
+        ESP_LOGI(
+            TAG,
+            "HMB|TEC SingleEye active, iris=%s",
+            HMB_EYE_IRIS_COLOR==HMB_EYE_IRIS_BROWN ? "brown" : "blue"
+        );
+    }
+
 public:
     CustomLcdDisplay(esp_lcd_panel_io_handle_t io_handle,
-                    esp_lcd_panel_handle_t panel_handle,
-                    int width,
-                    int height,
-                    int offset_x,
-                    int offset_y,
-                    bool mirror_x,
-                    bool mirror_y,
-                    bool swap_xy)
-        : SpiLcdDisplay(io_handle, panel_handle, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {
-        // Note: UI customization should be done in SetupUI(), not in constructor
-        // to ensure lvgl objects are created before accessing them
+                     esp_lcd_panel_handle_t panel_handle,
+                     int width,
+                     int height,
+                     int offset_x,
+                     int offset_y,
+                     bool mirror_x,
+                     bool mirror_y,
+                     bool swap_xy)
+        : SpiLcdDisplay(
+            io_handle,
+            panel_handle,
+            width,
+            height,
+            offset_x,
+            offset_y,
+            mirror_x,
+            mirror_y,
+            swap_xy
+        ){}
+
+    ~CustomLcdDisplay(){
+        if(eye_timer_){
+            lv_timer_delete(eye_timer_);
+            eye_timer_=nullptr;
+        }
     }
 
-    virtual void SetupUI() override {
-        // Call parent SetupUI() first to create all lvgl objects
+    virtual void SetupUI() override{
         SpiLcdDisplay::SetupUI();
 
-        DisplayLockGuard lock(this);
-        // 由于屏幕是圆的，所以状态栏需要增加左右内边距
-        lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES * 0.33, 0);
-        lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES * 0.33, 0);
+        {
+            DisplayLockGuard lock(this);
+
+            if(status_bar_){
+                lv_obj_set_style_pad_left(status_bar_,LV_HOR_RES*0.33,0);
+                lv_obj_set_style_pad_right(status_bar_,LV_HOR_RES*0.33,0);
+            }
+        }
+
+#if HMB_SINGLE_EYE_ENABLED
+        ESP_LOGI(TAG,"Scheduling HMB|TEC SingleEye setup");
+        lv_async_call(SetupEyeAsync,this);
+#endif
     }
 };
-
 
 class Spotpear_ESP32_S3_1_28_BOX : public WifiBoard {
 private:
