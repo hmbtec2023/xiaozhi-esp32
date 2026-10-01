@@ -301,9 +301,9 @@ private:
         light_ring_outer_=lv_obj_create(light_root_);
         light_ring_inner_=lv_obj_create(light_root_);
         light_core_=lv_obj_create(light_root_);
-        SetRing(light_ring_outer_,RING_OUTER_BASE,2,lv_color_white(),LV_OPA_20);
-        SetRing(light_ring_inner_,RING_INNER_BASE,3,lv_color_white(),LV_OPA_40);
-        SetFilledCircle(light_core_,CORE_BASE,lv_color_white(),LV_OPA_COVER);
+        SetRing(light_ring_outer_,RING_OUTER_BASE,2,lv_color_amber(),LV_OPA_20);
+        SetRing(light_ring_inner_,RING_INNER_BASE,3,lv_color_amber(),LV_OPA_40);
+        SetFilledCircle(light_core_,CORE_BASE,lv_color_amber(),LV_OPA_COVER);
         CenterObject(light_ring_outer_,RING_OUTER_BASE);
         CenterObject(light_ring_inner_,RING_INNER_BASE);
         CenterObject(light_core_,CORE_BASE);
