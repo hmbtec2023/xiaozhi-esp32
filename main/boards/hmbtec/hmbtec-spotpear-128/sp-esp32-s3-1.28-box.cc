@@ -37,6 +37,9 @@
 #include <dirent.h>
 #include "mcp_server.h"
 
+#include <ctime>
+#include <cmath>
+#include <cstring>
 
 #define TAG "Spotpear_ESP32_S3_1_28_BOX"
 
@@ -116,264 +119,215 @@ private:
 
 class CustomLcdDisplay : public SpiLcdDisplay {
 private:
-    lv_obj_t* eye_root_=nullptr;
-    lv_obj_t* eye_white_=nullptr;
-    lv_obj_t* iris_outer_=nullptr;
-    lv_obj_t* iris_mid_=nullptr;
-    lv_obj_t* iris_inner_=nullptr;
-    lv_obj_t* pupil_=nullptr;
-    lv_obj_t* highlight_big_=nullptr;
-    lv_obj_t* highlight_small_=nullptr;
-    lv_obj_t* lid_top_=nullptr;
-    lv_obj_t* lid_bottom_=nullptr;
-    lv_timer_t* eye_timer_=nullptr;
-    float eye_x_=0.0f;
-    float eye_y_=0.0f;
-    float target_x_=0.0f;
-    float target_y_=0.0f;
-    float blink_=0.0f;
-    bool blink_closing_=false;
-    bool double_blink_pending_=false;
-    int64_t next_look_ms_=0;
-    int64_t next_blink_ms_=0;
+    lv_obj_t* light_root_=nullptr;
+    lv_obj_t* clock_label_=nullptr;
+    lv_obj_t* mode_label_=nullptr;
+    lv_obj_t* light_ring_outer_=nullptr;
+    lv_obj_t* light_ring_inner_=nullptr;
+    lv_obj_t* light_core_=nullptr;
+    lv_timer_t* light_timer_=nullptr;
+    int64_t last_clock_update_ms_=0;
+    int64_t last_status_update_ms_=0;
+    float phase_=0.0f;
 
-    static constexpr int EYE_CX=120;
-    static constexpr int EYE_CY=130;
-    static constexpr int EYE_DIAMETER=218;
-    static constexpr int IRIS_OUTER=112;
-    static constexpr int IRIS_MID=92;
-    static constexpr int IRIS_INNER=70;
-    static constexpr int PUPIL=52;
-    static constexpr int LOOK_X=30;
-    static constexpr int LOOK_Y=21;
-    static constexpr int LID_MAX=105;
+    static constexpr int LIGHT_CX=120;
+    static constexpr int LIGHT_CY=126;
+    static constexpr int CORE_BASE=30;
+    static constexpr int RING_INNER_BASE=72;
+    static constexpr int RING_OUTER_BASE=122;
 
-    static void SetCircle(lv_obj_t* obj,int size,lv_color_t color){
+    void UpdateClock(){
+        if(!clock_label_) return;
+        time_t now=time(nullptr);
+        struct tm timeinfo;
+        if(!localtime_r(&now,&timeinfo)) return;
+        char buffer[6];
+        strftime(buffer,sizeof(buffer),"%H:%M",&timeinfo);
+        lv_label_set_text(clock_label_,buffer);
+        lv_obj_move_foreground(clock_label_);
+    }
+
+    bool IsClockText(const char* text){
+        if(!text || !text[0]) return false;
+        int hour=-1;
+        int minute=-1;
+        char tail=0;
+        int matched=sscanf(text,"%d:%d%c",&hour,&minute,&tail);
+        return matched==2 && hour>=0 && hour<=23 && minute>=0 && minute<=59;
+    }
+
+    void UpdateModeStatus(){
+        if(!mode_label_ || !status_label_) return;
+        const char* text=lv_label_get_text(status_label_);
+        if(!text || !text[0] || IsClockText(text)) return;
+        const char* current=lv_label_get_text(mode_label_);
+        if(!current || strcmp(current,text)!=0) lv_label_set_text(mode_label_,text);
+        lv_obj_move_foreground(mode_label_);
+    }
+
+    static void SetFilledCircle(lv_obj_t* obj,int size,lv_color_t color,lv_opa_t opa){
         if(!obj) return;
         lv_obj_set_size(obj,size,size);
         lv_obj_set_style_radius(obj,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_color(obj,color,0);
-        lv_obj_set_style_bg_opa(obj,LV_OPA_COVER,0);
+        lv_obj_set_style_bg_opa(obj,opa,0);
         lv_obj_set_style_border_width(obj,0,0);
         lv_obj_set_style_pad_all(obj,0,0);
         lv_obj_clear_flag(obj,LV_OBJ_FLAG_SCROLLABLE);
     }
 
-    void PositionEye(){
-        if(!iris_outer_ || !iris_mid_ || !iris_inner_ || !pupil_ ||
-           !highlight_big_ || !highlight_small_) return;
-
-        int x=EYE_CX+(int)eye_x_;
-        int y=EYE_CY+(int)eye_y_;
-
-        lv_obj_set_pos(iris_outer_,x-IRIS_OUTER/2,y-IRIS_OUTER/2);
-        lv_obj_set_pos(iris_mid_,x-IRIS_MID/2,y-IRIS_MID/2);
-        lv_obj_set_pos(iris_inner_,x-IRIS_INNER/2,y-IRIS_INNER/2);
-        lv_obj_set_pos(pupil_,x-PUPIL/2,y-PUPIL/2);
-        lv_obj_set_pos(highlight_big_,x-23,y-25);
-        lv_obj_set_pos(highlight_small_,x+14,y+11);
+    static void SetRing(lv_obj_t* obj,int size,int width,lv_color_t color,lv_opa_t opa){
+        if(!obj) return;
+        lv_obj_set_size(obj,size,size);
+        lv_obj_set_style_radius(obj,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_opa(obj,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_color(obj,color,0);
+        lv_obj_set_style_border_opa(obj,opa,0);
+        lv_obj_set_style_border_width(obj,width,0);
+        lv_obj_set_style_pad_all(obj,0,0);
+        lv_obj_clear_flag(obj,LV_OBJ_FLAG_SCROLLABLE);
     }
 
-    void UpdateLids(){
-        if(!lid_top_ || !lid_bottom_) return;
-
-        int lid=(int)(LID_MAX*blink_);
-        lv_obj_set_height(lid_top_,24+lid);
-        lv_obj_set_height(lid_bottom_,20+lid);
+    static void CenterObject(lv_obj_t* obj,int size){
+        if(!obj) return;
+        lv_obj_set_size(obj,size,size);
+        lv_obj_set_pos(obj,LIGHT_CX-size/2,LIGHT_CY-size/2);
     }
 
-    void Animate(){
-        if(!eye_root_) return;
-
+    void AnimateLight(){
+        if(!light_root_ || !light_core_ || !light_ring_inner_ || !light_ring_outer_) return;
         int64_t now=esp_timer_get_time()/1000;
+        if(now-last_clock_update_ms_>=1000){
+            last_clock_update_ms_=now;
+            UpdateClock();
+        }
+        if(now-last_status_update_ms_>=200){
+            last_status_update_ms_=now;
+            UpdateModeStatus();
+        }
+
         DeviceState state=Application::GetInstance().GetDeviceState();
+        float speed=0.045f;
+        float amplitude=1.0f;
+        int core_base=CORE_BASE;
+        int inner_base=RING_INNER_BASE;
+        int outer_base=RING_OUTER_BASE;
+        lv_opa_t core_opa=LV_OPA_COVER;
+        lv_opa_t inner_opa=LV_OPA_40;
+        lv_opa_t outer_opa=LV_OPA_20;
 
-        if(now>=next_look_ms_){
-            if(state==kDeviceStateListening){
-                target_x_=0.0f;
-                target_y_=0.0f;
-                next_look_ms_=now+900;
-            }else if(state==kDeviceStateSpeaking){
-                target_x_=(float)((int)(esp_random()%41)-20);
-                target_y_=(float)((int)(esp_random()%25)-12);
-                next_look_ms_=now+650+(esp_random()%550);
-            }else{
-                target_x_=(float)((int)(esp_random()%(LOOK_X*2+1))-LOOK_X);
-                target_y_=(float)((int)(esp_random()%(LOOK_Y*2+1))-LOOK_Y);
-                next_look_ms_=now+900+(esp_random()%2200);
-            }
+        if(state==kDeviceStateListening){
+            speed=0.075f;
+            amplitude=1.5f;
+            core_base=36;
+            inner_base=66;
+            outer_base=112;
+            inner_opa=LV_OPA_60;
+            outer_opa=LV_OPA_30;
+        }else if(state==kDeviceStateSpeaking){
+            speed=0.16f;
+            amplitude=2.4f;
+            core_base=34;
+            inner_base=76;
+            outer_base=126;
+            inner_opa=LV_OPA_70;
+            outer_opa=LV_OPA_40;
         }
 
-        eye_x_+=(target_x_-eye_x_)*0.16f;
-        eye_y_+=(target_y_-eye_y_)*0.16f;
-        PositionEye();
+        phase_+=speed;
+        if(phase_>6.2831853f) phase_-=6.2831853f;
+        float wave=(sinf(phase_)+1.0f)*0.5f;
+        int core_size=core_base+(int)(wave*6.0f*amplitude);
+        int inner_size=inner_base+(int)(wave*8.0f*amplitude);
+        int outer_size=outer_base+(int)(wave*10.0f*amplitude);
 
-        if(now>=next_blink_ms_ && !blink_closing_ && blink_<=0.0f){
-            blink_closing_=true;
-            double_blink_pending_=(esp_random()%8)==0;
-        }
-
-        if(blink_closing_){
-            blink_+=0.34f;
-
-            if(blink_>=1.0f){
-                blink_=1.0f;
-                blink_closing_=false;
-            }
-        }else if(blink_>0.0f){
-            blink_-=0.26f;
-
-            if(blink_<=0.0f){
-                blink_=0.0f;
-
-                if(double_blink_pending_){
-                    double_blink_pending_=false;
-                    next_blink_ms_=now+170;
-                }else{
-                    next_blink_ms_=now+2800+(esp_random()%4200);
-                }
-            }
-        }
-
-        UpdateLids();
+        CenterObject(light_core_,core_size);
+        CenterObject(light_ring_inner_,inner_size);
+        CenterObject(light_ring_outer_,outer_size);
+        lv_obj_set_style_bg_opa(light_core_,core_opa,0);
+        lv_obj_set_style_border_opa(light_ring_inner_,inner_opa,0);
+        lv_obj_set_style_border_opa(light_ring_outer_,outer_opa,0);
+        lv_obj_move_foreground(clock_label_);
+        lv_obj_move_foreground(mode_label_);
     }
 
-    static void EyeTimerCallback(lv_timer_t* timer){
+    static void LightTimerCallback(lv_timer_t* timer){
         auto* self=static_cast<CustomLcdDisplay*>(lv_timer_get_user_data(timer));
-        if(self) self->Animate();
+        if(self) self->AnimateLight();
     }
 
-    static void SetupEyeAsync(void* user_data){
+    static void SetupLightAsync(void* user_data){
         auto* self=static_cast<CustomLcdDisplay*>(user_data);
-        if(self) self->SetupEye();
+        if(self) self->SetupLight();
     }
 
-    void SetupEye(){
-        if(eye_root_){
-            ESP_LOGW(TAG,"SetupEye ignored: eye already initialized");
+    void SetupLight(){
+        if(light_root_){
+            ESP_LOGW(TAG,"SetupLight ignored: Lichtblick already initialized");
             return;
         }
-
-        ESP_LOGI(TAG,"SetupEye start");
-
+        ESP_LOGI(TAG,"SetupLight start");
         lv_obj_t* screen=lv_screen_active();
         if(!screen){
-            ESP_LOGE(TAG,"SetupEye failed: no active LVGL screen");
+            ESP_LOGE(TAG,"SetupLight failed: no active LVGL screen");
             return;
         }
 
-        // ---------------------------------------------------------------------
-        // HMB | TEC SingleEye root layer
-        // ---------------------------------------------------------------------
-        // Die originale XiaoZhi-Oberflaeche wird nicht veraendert.
-        // Das Auge liegt als eigene schwarze Ebene darueber.
-        eye_root_=lv_obj_create(screen);
-        if(!eye_root_){
-            ESP_LOGE(TAG,"SetupEye failed: eye_root creation failed");
+        light_root_=lv_obj_create(screen);
+        if(!light_root_){
+            ESP_LOGE(TAG,"SetupLight failed: light_root creation failed");
             return;
         }
+        lv_obj_set_size(light_root_,240,240);
+        lv_obj_set_pos(light_root_,0,0);
+        lv_obj_set_style_bg_color(light_root_,lv_color_black(),0);
+        lv_obj_set_style_bg_opa(light_root_,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(light_root_,0,0);
+        lv_obj_set_style_pad_all(light_root_,0,0);
+        lv_obj_set_style_radius(light_root_,0,0);
+        lv_obj_clear_flag(light_root_,LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_set_size(eye_root_,240,240);
-        lv_obj_set_pos(eye_root_,0,0);
-        lv_obj_set_style_bg_color(eye_root_,lv_color_black(),0);
-        lv_obj_set_style_bg_opa(eye_root_,LV_OPA_COVER,0);
-        lv_obj_set_style_border_width(eye_root_,0,0);
-        lv_obj_set_style_pad_all(eye_root_,0,0);
-        lv_obj_set_style_radius(eye_root_,0,0);
-        lv_obj_clear_flag(eye_root_,LV_OBJ_FLAG_SCROLLABLE);
+        // HMB | TEC Clock
+        clock_label_=lv_label_create(light_root_);
+        lv_label_set_text(clock_label_,"--:--");
+        lv_obj_set_style_text_color(clock_label_,lv_color_white(),0);
+        lv_obj_set_style_text_font(clock_label_,&lv_font_montserrat_24,0);
+        lv_obj_set_style_text_opa(clock_label_,LV_OPA_COVER,0);
+        lv_obj_set_style_bg_opa(clock_label_,LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(clock_label_,0,0);
+        lv_obj_align(clock_label_,LV_ALIGN_TOP_MID,0,6);
 
-        // ---------------------------------------------------------------------
-        // Eye white
-        // ---------------------------------------------------------------------
-        eye_white_=lv_obj_create(eye_root_);
-        SetCircle(eye_white_,EYE_DIAMETER,lv_color_white());
-        lv_obj_set_pos(
-            eye_white_,
-            EYE_CX-EYE_DIAMETER/2,
-            EYE_CY-EYE_DIAMETER/2
-        );
+        // HMB | TEC Lichtblick symbol
+        light_ring_outer_=lv_obj_create(light_root_);
+        light_ring_inner_=lv_obj_create(light_root_);
+        light_core_=lv_obj_create(light_root_);
+        SetRing(light_ring_outer_,RING_OUTER_BASE,2,lv_color_white(),LV_OPA_20);
+        SetRing(light_ring_inner_,RING_INNER_BASE,3,lv_color_white(),LV_OPA_40);
+        SetFilledCircle(light_core_,CORE_BASE,lv_color_white(),LV_OPA_COVER);
+        CenterObject(light_ring_outer_,RING_OUTER_BASE);
+        CenterObject(light_ring_inner_,RING_INNER_BASE);
+        CenterObject(light_core_,CORE_BASE);
 
-        // ---------------------------------------------------------------------
-        // Iris colors
-        // ---------------------------------------------------------------------
-#if HMB_EYE_IRIS_COLOR == HMB_EYE_IRIS_BROWN
-        const lv_color_t iris1=lv_color_hex(0x9A6538);
-        const lv_color_t iris2=lv_color_hex(0x70431F);
-        const lv_color_t iris3=lv_color_hex(0xB6814E);
-#else
-        const lv_color_t iris1=lv_color_hex(0x2388C7);
-        const lv_color_t iris2=lv_color_hex(0x12649B);
-        const lv_color_t iris3=lv_color_hex(0x55B8E8);
-#endif
+        // HMB | TEC Operating Status
+        mode_label_=lv_label_create(light_root_);
+        lv_label_set_text(mode_label_,"BEREIT");
+        lv_obj_set_style_text_color(mode_label_,lv_color_white(),0);
+        lv_obj_set_style_text_font(mode_label_,&font_noto_sans_basic_16_4,0);
+        lv_obj_set_style_text_opa(mode_label_,LV_OPA_COVER,0);
+        lv_obj_set_style_bg_opa(mode_label_,LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(mode_label_,0,0);
+        lv_obj_set_width(mode_label_,220);
+        lv_obj_set_style_text_align(mode_label_,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_align(mode_label_,LV_ALIGN_BOTTOM_MID,0,-6);
 
-        // ---------------------------------------------------------------------
-        // Iris / pupil / highlights
-        // ---------------------------------------------------------------------
-        iris_outer_=lv_obj_create(eye_root_);
-        iris_mid_=lv_obj_create(eye_root_);
-        iris_inner_=lv_obj_create(eye_root_);
-        pupil_=lv_obj_create(eye_root_);
-        highlight_big_=lv_obj_create(eye_root_);
-        highlight_small_=lv_obj_create(eye_root_);
+        UpdateClock();
+        UpdateModeStatus();
+        lv_obj_move_foreground(clock_label_);
+        lv_obj_move_foreground(mode_label_);
 
-        SetCircle(iris_outer_,IRIS_OUTER,iris1);
-        SetCircle(iris_mid_,IRIS_MID,iris2);
-        SetCircle(iris_inner_,IRIS_INNER,iris3);
-        SetCircle(pupil_,PUPIL,lv_color_black());
-        SetCircle(highlight_big_,18,lv_color_white());
-        SetCircle(highlight_small_,8,lv_color_white());
-
-        PositionEye();
-
-        // ---------------------------------------------------------------------
-        // Eyelids
-        // ---------------------------------------------------------------------
-        lid_top_=lv_obj_create(eye_root_);
-        lid_bottom_=lv_obj_create(eye_root_);
-
-        for(auto* lid:{lid_top_,lid_bottom_}){
-            lv_obj_set_width(lid,240);
-            lv_obj_set_style_bg_color(lid,lv_color_black(),0);
-            lv_obj_set_style_bg_opa(lid,LV_OPA_COVER,0);
-            lv_obj_set_style_border_width(lid,0,0);
-            lv_obj_set_style_pad_all(lid,0,0);
-            lv_obj_set_style_radius(lid,70,0);
-            lv_obj_clear_flag(lid,LV_OBJ_FLAG_SCROLLABLE);
-        }
-
-        lv_obj_align(lid_top_,LV_ALIGN_TOP_MID,0,-34);
-        lv_obj_align(lid_bottom_,LV_ALIGN_BOTTOM_MID,0,34);
-
-        UpdateLids();
-
-        // ---------------------------------------------------------------------
-        // XiaoZhi status bar remains visible above eye
-        // ---------------------------------------------------------------------
-        if(status_bar_){
-            lv_obj_move_foreground(status_bar_);
-        }
-
-        if(status_label_){
-            lv_obj_set_style_text_color(status_label_,lv_color_white(),0);
-        }
-
-        // ---------------------------------------------------------------------
-        // Animation
-        // ---------------------------------------------------------------------
-        int64_t now=esp_timer_get_time()/1000;
-        next_look_ms_=now+700;
-        next_blink_ms_=now+2200;
-
-        if(!eye_timer_){
-            eye_timer_=lv_timer_create(EyeTimerCallback,45,this);
-        }
-
-        ESP_LOGI(TAG,"SetupEye complete");
-        ESP_LOGI(
-            TAG,
-            "HMB|TEC SingleEye active, iris=%s",
-            HMB_EYE_IRIS_COLOR==HMB_EYE_IRIS_BROWN ? "brown" : "blue"
-        );
+        if(!light_timer_) light_timer_=lv_timer_create(LightTimerCallback,45,this);
+        ESP_LOGI(TAG,"SetupLight complete");
+        ESP_LOGI(TAG,"HMB|TEC Lichtblick active");
     }
 
 public:
@@ -386,40 +340,27 @@ public:
                      bool mirror_x,
                      bool mirror_y,
                      bool swap_xy)
-        : SpiLcdDisplay(
-            io_handle,
-            panel_handle,
-            width,
-            height,
-            offset_x,
-            offset_y,
-            mirror_x,
-            mirror_y,
-            swap_xy
-        ){}
+        : SpiLcdDisplay(io_handle,panel_handle,width,height,offset_x,offset_y,mirror_x,mirror_y,swap_xy){}
 
     ~CustomLcdDisplay(){
-        if(eye_timer_){
-            lv_timer_delete(eye_timer_);
-            eye_timer_=nullptr;
+        if(light_timer_){
+            lv_timer_delete(light_timer_);
+            light_timer_=nullptr;
         }
     }
 
     virtual void SetupUI() override{
         SpiLcdDisplay::SetupUI();
-
         {
             DisplayLockGuard lock(this);
-
             if(status_bar_){
                 lv_obj_set_style_pad_left(status_bar_,LV_HOR_RES*0.33,0);
                 lv_obj_set_style_pad_right(status_bar_,LV_HOR_RES*0.33,0);
             }
         }
-
 #if HMB_SINGLE_EYE_ENABLED
-        ESP_LOGI(TAG,"Scheduling HMB|TEC SingleEye setup");
-        lv_async_call(SetupEyeAsync,this);
+        ESP_LOGI(TAG,"Scheduling HMB|TEC Lichtblick setup");
+        lv_async_call(SetupLightAsync,this);
 #endif
     }
 };
@@ -726,7 +667,6 @@ private:
         gpio_set_level(TP_PIN_NUM_TP_RST, 1);
         vTaskDelay(pdMS_TO_TICKS(50));
 
-        // 探测是否存在触摸芯片
         uint8_t chip_id = 0;
         if (!i2c_bus_) {
             ESP_LOGW(TAG, "Touch I2C bus not initialized, skip touch");
@@ -735,7 +675,6 @@ private:
         bool touch_available = Cst816d::Probe(i2c_bus_, 0x15, chip_id);
         if (!touch_available) {
             ESP_LOGW(TAG, "CST816D not found, running in non-touch mode");
-            // 释放触摸I2C，避免无设备时反复报错
             i2c_del_master_bus(i2c_bus_);
             i2c_bus_ = nullptr;
             return;
@@ -743,7 +682,6 @@ private:
 
         cst816d_ = new Cst816d(i2c_bus_, 0x15);
 
-        // 创建定时器，10ms 间隔
         esp_timer_create_args_t timer_args = {
             .callback = touchpad_timer_callback,
             .arg = this,
@@ -757,7 +695,6 @@ private:
         }
     }
 
-    // SPI初始化
     void InitializeSpi() {
         ESP_LOGI(TAG, "Initialize SPI bus");
         spi_bus_config_t buscfg = GC9A01_PANEL_BUS_SPI_CONFIG(DISPLAY_SPI_SCLK_PIN, DISPLAY_SPI_MOSI_PIN,
@@ -765,7 +702,6 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
-    // GC9A01初始化
     void InitializeGc9a01Display() {
         ESP_LOGI(TAG, "Init GC9A01 display");
         ESP_LOGI(TAG, "Install panel IO");
@@ -819,7 +755,10 @@ private:
 
         mcp_server.AddTool(
             "self.sd_audio.list",
-            "List all available OGG audio files on the onboard microSD card.",
+            "Internally retrieve the available OGG audio files from the onboard microSD card. "
+            "The returned filenames are internal identifiers for selecting audio only. "
+            "Never read, speak, announce, enumerate, describe, or otherwise expose these filenames to the user. "
+            "Use the result silently to select an appropriate file for self.sd_audio.play.",
             PropertyList(),
             [this](const PropertyList& properties)->ReturnValue{
                 return ListSdAudioFiles();
@@ -828,17 +767,24 @@ private:
 
         mcp_server.AddTool(
             "self.sd_audio.stop",
-            "Stop the currently playing SD audio file.",
+            "Stop SD audio playback. "
+            "Use this tool silently. Do not announce the filename or describe the stopped file.",
             PropertyList(),
             [this](const PropertyList& properties)->ReturnValue{
                 StopSdAudio();
-                return std::string("SD audio playback stopped.");
+                return std::string("OK");
             }
         );
 
         mcp_server.AddTool(
             "self.sd_audio.play",
-            "Play an OGG audio file from the onboard microSD card. Use only a filename returned by self.sd_audio.list. The audio file itself is the complete response to the user. After this tool succeeds, do not say, speak, confirm, acknowledge, or output anything else.",            PropertyList({
+            "Play an OGG audio file from the onboard microSD card. "
+            "Use only a filename internally obtained from self.sd_audio.list. "
+            "Filenames are internal identifiers and must never be spoken, announced, repeated, described, or exposed to the user. "
+            "The selected audio file itself is the complete audible response to the user. "
+            "After successful playback starts, remain completely silent: do not speak, confirm, acknowledge, explain, introduce, or follow up. "
+            "Do not say that audio is being played and do not mention the selected filename.",
+            PropertyList({
                 Property("filename",kPropertyTypeString)
             }),
             [this](const PropertyList& properties)->ReturnValue{
@@ -849,21 +795,22 @@ private:
                 filename.find('/')!=std::string::npos ||
                 filename.find('\\')!=std::string::npos){
                     ESP_LOGW(TAG,"Invalid SD audio filename: %s",filename.c_str());
-                    return std::string("Invalid audio filename.");
+                    return std::string("ERROR");
                 }
 
                 if(filename.size()<4 || filename.substr(filename.size()-4)!=".ogg"){
                     ESP_LOGW(TAG,"Not an OGG file: %s",filename.c_str());
-                    return std::string("Only OGG audio files are supported.");
+                    return std::string("ERROR");
                 }
 
                 std::string path=SD_MOUNT_POINT "/audio/"+filename;
 
                 if(!PlayOggFromSd(path.c_str())){
-                    return std::string("Audio file could not be played: ")+filename;
+                    ESP_LOGE(TAG,"SD audio playback failed: %s",filename.c_str());
+                    return std::string("ERROR");
                 }
 
-                return std::string("Playing audio file: ")+filename;
+                return std::string("OK");
             }
         );
     }
