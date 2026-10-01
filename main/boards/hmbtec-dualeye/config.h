@@ -22,9 +22,11 @@
 // ============================================================================
 // Board
 // ============================================================================
+#define HMB_LED_STRIP_GPIO GPIO_NUM_41 // eigentlich SDA, aber hier als GPIO für LED-Streifen genutzt
+#define HMB_LED_STRIP_COUNT 6
 
-#define BUILTIN_LED_GPIO GPIO_NUM_48
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
+#define BUILTIN_LED_GPIO GPIO_NUM_48
 
 // ============================================================================
 // HMB | TEC DualEye
@@ -43,7 +45,7 @@
 // ---------------------------------------------------------------------------
 
 // Kleine Augen:
-#define HMB_EYE_DISPLAY HMB_EYE_GC9D01_160
+#define HMB_EYE_DISPLAY HMB_EYE_GC9A01_240
 
 // Große Augen:
 //#define HMB_EYE_DISPLAY HMB_EYE_GC9A01_240

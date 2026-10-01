@@ -4,7 +4,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "led/single_led.h"
+#include "led/circular_strip.h"
 #include "hmb_dualeye.h"
 #include "mcp_server.h"
 
@@ -295,9 +295,8 @@ public:
     // ------------------------------------------------------------------------
     // LED
     // ------------------------------------------------------------------------
-
     Led* GetLed() override {
-        static SingleLed led(BUILTIN_LED_GPIO);
+        static CircularStrip led(HMB_LED_STRIP_GPIO,HMB_LED_STRIP_COUNT);
         return &led;
     }
 

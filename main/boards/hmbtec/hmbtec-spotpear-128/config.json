@@ -1,0 +1,11 @@
+{
+    "manufacturer": "hmbtec",
+    "type": "hmbtec-spotpear-128",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "hmbtec-spotpear-128",
+            "sdkconfig_append": []
+        }
+    ]
+}

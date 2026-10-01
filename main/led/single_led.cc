@@ -1,8 +1,9 @@
 #include "single_led.h"
 #include "application.h"
 #include <esp_log.h> 
-
 #define TAG "SingleLed"
+
+//#define HMB_MASKE 0 // eigentlich bereits in config.h definiert, aber hier zur Sicherheit
 
 #define DEFAULT_BRIGHTNESS 4
 #define HIGH_BRIGHTNESS 16
@@ -20,6 +21,7 @@ SingleLed::SingleLed(gpio_num_t gpio) {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = gpio;
     strip_config.max_leds = 1;
+    
     strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
     strip_config.led_model = LED_MODEL_WS2812;
 
