@@ -34,6 +34,7 @@
 #include "application.h"
 #include <string>
 #include <dirent.h>
+#include "mcp_server.h"
 
 
 #define TAG "Spotpear_ESP32_S3_1_28_BOX"
@@ -201,47 +202,47 @@ private:
             (unsigned long long)(sd_card_->csd.capacity * sd_card_->csd.sector_size / (1024ULL * 1024ULL)));
     }
 
-    void PlayOggFromSd(const char* path){
-        ESP_LOGI(TAG, "Loading OGG: %s", path);
+    bool PlayOggFromSd(const char* path){
+        ESP_LOGI(TAG,"Loading OGG: %s",path);
 
-        FILE* file = fopen(path, "rb");
+        FILE* file=fopen(path,"rb");
         if(!file){
-            ESP_LOGE(TAG, "Cannot open OGG: %s", path);
-            return;
+            ESP_LOGE(TAG,"Cannot open OGG: %s",path);
+            return false;
         }
 
-        fseek(file, 0, SEEK_END);
-        long file_size = ftell(file);
-        fseek(file, 0, SEEK_SET);
+        fseek(file,0,SEEK_END);
+        long file_size=ftell(file);
+        fseek(file,0,SEEK_SET);
 
-        if(file_size <= 0){
-            ESP_LOGE(TAG, "Invalid OGG size: %ld", file_size);
+        if(file_size<=0){
+            ESP_LOGE(TAG,"Invalid OGG size: %ld",file_size);
             fclose(file);
-            return;
+            return false;
         }
 
-        ESP_LOGI(TAG, "OGG size: %ld bytes", file_size);
+        ESP_LOGI(TAG,"OGG size: %ld bytes",file_size);
 
-        uint8_t* ogg = static_cast<uint8_t*>(
-            heap_caps_malloc(file_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        uint8_t* ogg=static_cast<uint8_t*>(
+            heap_caps_malloc(file_size,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
         );
 
         if(!ogg){
-            ESP_LOGE(TAG, "PSRAM allocation failed: %ld bytes", file_size);
+            ESP_LOGE(TAG,"PSRAM allocation failed: %ld bytes",file_size);
             fclose(file);
-            return;
+            return false;
         }
 
-        size_t bytes_read = fread(ogg, 1, file_size, file);
+        size_t bytes_read=fread(ogg,1,file_size,file);
         fclose(file);
 
-        if(bytes_read != static_cast<size_t>(file_size)){
-            ESP_LOGE(TAG, "OGG read failed: %u/%ld bytes", (unsigned)bytes_read, file_size);
+        if(bytes_read!=static_cast<size_t>(file_size)){
+            ESP_LOGE(TAG,"OGG read failed: %u/%ld bytes",(unsigned)bytes_read,file_size);
             heap_caps_free(ogg);
-            return;
+            return false;
         }
 
-        ESP_LOGI(TAG, "OGG loaded in PSRAM, starting playback");
+        ESP_LOGI(TAG,"OGG loaded in PSRAM, starting playback");
 
         std::string_view ogg_view(
             reinterpret_cast<const char*>(ogg),
@@ -252,39 +253,56 @@ private:
 
         heap_caps_free(ogg);
 
-        ESP_LOGI(TAG, "OGG submitted to AudioService");
+        ESP_LOGI(TAG,"OGG submitted to AudioService");
+        return true;
     }
-
     void StopSdAudio(){
         ESP_LOGI(TAG, "Stopping SD audio");
         Application::GetInstance().GetAudioService().ResetDecoder();
     }
 
-    void ListSdAudioFiles(){
+    std::string ListSdAudioFiles(){
         ESP_LOGI(TAG, "Audio files on SD:");
 
-        DIR* dir = opendir(SD_MOUNT_POINT "/audio");
+        DIR* dir=opendir(SD_MOUNT_POINT "/audio");
         if(!dir){
             ESP_LOGE(TAG, "Cannot open " SD_MOUNT_POINT "/audio");
-            return;
+            return "SD audio directory cannot be opened.";
         }
 
         struct dirent* entry;
-        int count = 0;
+        int count=0;
+        std::string result;
 
-        while((entry = readdir(dir)) != nullptr){
-            if(entry->d_name[0] == '.'){
+        while((entry=readdir(dir))!=nullptr){
+            if(entry->d_name[0]=='.'){
                 continue;
             }
 
-            ESP_LOGI(TAG, "  [%d] %s", ++count, entry->d_name);
+            std::string filename=entry->d_name;
+            if(filename.size()<4 || filename.substr(filename.size()-4)!=".ogg"){
+                continue;
+            }
+
+            ESP_LOGI(TAG, "  [%d] %s",++count,entry->d_name);
+
+            if(!result.empty()){
+                result+=", ";
+            }
+            result+=filename;
         }
 
         closedir(dir);
 
-        ESP_LOGI(TAG, "Audio files found: %d", count);
-    }
+        ESP_LOGI(TAG, "Audio files found: %d",count);
 
+        if(count==0){
+            return "No OGG audio files found.";
+        }
+
+        return result;
+    }
+    
     void InitializePowerSaveTimer() {
         rtc_gpio_init(GPIO_NUM_3);
         rtc_gpio_set_direction(GPIO_NUM_3, RTC_GPIO_MODE_OUTPUT_ONLY);
@@ -511,6 +529,62 @@ private:
 
     }
 
+    void InitializeTools(){
+        auto& mcp_server=McpServer::GetInstance();
+
+        ESP_LOGI(TAG,"Initializing HMB|TEC SD audio MCP tools");
+
+        mcp_server.AddTool(
+            "self.sd_audio.list",
+            "List all available OGG audio files on the onboard microSD card.",
+            PropertyList(),
+            [this](const PropertyList& properties)->ReturnValue{
+                return ListSdAudioFiles();
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.sd_audio.stop",
+            "Stop the currently playing SD audio file.",
+            PropertyList(),
+            [this](const PropertyList& properties)->ReturnValue{
+                StopSdAudio();
+                return std::string("SD audio playback stopped.");
+            }
+        );
+
+        mcp_server.AddTool(
+            "self.sd_audio.play",
+            "Play an OGG audio file from the onboard microSD card. Use only a filename returned by self.sd_audio.list. The audio file itself is the complete response to the user. After this tool succeeds, do not say, speak, confirm, acknowledge, or output anything else.",            PropertyList({
+                Property("filename",kPropertyTypeString)
+            }),
+            [this](const PropertyList& properties)->ReturnValue{
+                std::string filename=properties["filename"].value<std::string>();
+
+                if(filename.empty() ||
+                filename.find("..")!=std::string::npos ||
+                filename.find('/')!=std::string::npos ||
+                filename.find('\\')!=std::string::npos){
+                    ESP_LOGW(TAG,"Invalid SD audio filename: %s",filename.c_str());
+                    return std::string("Invalid audio filename.");
+                }
+
+                if(filename.size()<4 || filename.substr(filename.size()-4)!=".ogg"){
+                    ESP_LOGW(TAG,"Not an OGG file: %s",filename.c_str());
+                    return std::string("Only OGG audio files are supported.");
+                }
+
+                std::string path=SD_MOUNT_POINT "/audio/"+filename;
+
+                if(!PlayOggFromSd(path.c_str())){
+                    return std::string("Audio file could not be played: ")+filename;
+                }
+
+                return std::string("Playing audio file: ")+filename;
+            }
+        );
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -522,9 +596,16 @@ private:
             app.ToggleChatState();
         });
         boot_button_.OnLongPress([this](){
-            ESP_LOGI(TAG, "BOOT long press -> SD audio test");
-            ListSdAudioFiles();
-            PlayOggFromSd(SD_MOUNT_POINT "/audio/test1.ogg");
+            auto& audio=Application::GetInstance().GetAudioService();
+
+            if(!audio.IsPlaybackIdle()){
+                ESP_LOGI(TAG, "BOOT long press -> STOP SD audio");
+                StopSdAudio();
+            }else{
+                ESP_LOGI(TAG, "BOOT long press -> PLAY SD audio");
+                ListSdAudioFiles();
+                PlayOggFromSd(SD_MOUNT_POINT "/audio/test1.ogg");
+            }
         });
 
     }
@@ -546,6 +627,7 @@ public:
 
         InitializeGc9a01Display();
         InitializeButtons();
+        InitializeTools();
         if (GetBacklight()) {
             GetBacklight()->RestoreBrightness();
         }
