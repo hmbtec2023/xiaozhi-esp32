@@ -28,9 +28,14 @@ grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 ## Build
 python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64 --language de-DE
 
-## Flashen
+## Flashen 16MB
+pkill -f idf_monitor.py
  ls /dev/cu.usbmodem*
  python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 16MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x20000 build/xiaozhi.bin 0x800000 build/generated_assets.bin
+
+## Flashen 4MB (SuperMini)
+pkill -f idf_monitor.py
+python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin
 
 ## Merker
 Boardwechsel immer über scripts/build.py.

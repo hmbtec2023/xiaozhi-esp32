@@ -523,6 +523,13 @@ private:
         ESP_LOGI(TAG,"Flammenmoment -> count=%d mask=0x%02X",count,mask);
     }
 
+    uint8_t SetRandomFlameMoment(){
+        uint8_t count=(uint8_t)((esp_random()%4)+1);
+        ESP_LOGI(TAG,"Flammenmoment random selection -> %d",count);
+        SetFlameMoment(count);
+        return count;
+    }
+
     void InitializeFlames(){
         ESP_LOGI(
             TAG,
@@ -569,7 +576,7 @@ private:
 
         auto& mcp_server=McpServer::GetInstance();
 
-#if HMB_FLAME_EN
+        #if HMB_FLAME_EN
         // ------------------------------------------------------------------------
         // HMB|TEC direct flame control
         //
@@ -605,41 +612,65 @@ private:
                 return true;
             }
         );
-
+        // ------------------------------------------------------------------------
+        // HMB|TEC automatischer Flammenmoment
+        //
+        // Keine Anzahl von der KI.
+        // Der Controller bestimmt zufällig 1..4.
+        // ------------------------------------------------------------------------
+        mcp_server.AddTool(
+            "self.flame.random_moment",
+            "Creates a random HMBTEC Flammenmoment. "
+            "Use this tool for a normal Lichtblick when there is no genuine contextual "
+            "reason for a specific number of flames. "
+            "The device itself randomly chooses between one and four flames. "
+            "The returned value is the actual number of illuminated flames.",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                uint8_t selected=SetRandomFlameMoment();
+                ESP_LOGI(TAG,"Flammenmoment RANDOM TOOL result=%d",selected);
+                return std::to_string(selected);
+            }
+        );
         // ------------------------------------------------------------------------
         // HMB|TEC Flammenmoment
         //
-        // Die KI bestimmt die bedeutungsvolle Anzahl 1..4.
-        // Der Controller wählt zufällig die konkreten Flammen.
+        // count 1..4 = KI hat einen echten semantischen Grund für die Anzahl.
+        // count 0    = Controller wählt zufällig 1..4.
         // ------------------------------------------------------------------------
         mcp_server.AddTool(
             "self.flame.moment",
-            "Creates an HMBTEC Flammenmoment with one to four flames. "
-            "Use this tool during a Lichtblick when flames are available. "
-            "The AI chooses the meaningful number of flames from 1 to 4. "
-            "If there is a real contextual reason for a particular number, use it. "
-            "Examples include an actual calendar event, date, season or meaningful conversation context. "
-            "Never invent a factual event or circumstance to justify the number. "
-            "If there is no genuine contextual reason, freely choose a number from 1 to 4 "
-            "and give it a short, warm, symbolic meaning in the spoken Lichtblick.",
+            "Creates an HMBTEC Flammenmoment. "
+            "Use count 1, 2, 3 or 4 only if there is a genuine contextual reason "
+            "for exactly that number. "
+            "If there is no genuine reason for a particular number, always use count 0. "
+            "With count 0 the device randomly chooses one to four flames. "
+            "Never invent a factual reason for choosing a specific number.",
             PropertyList({
-                Property("count",kPropertyTypeInteger,1,4)
+                Property("count",kPropertyTypeInteger,0,4)
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 int count=properties["count"].value<int>();
 
-                if(count<1 || count>4){
+                ESP_LOGI(TAG,"Flammenmoment MCP received count=%d",count);
+
+                if(count<0 || count>4){
                     ESP_LOGW(TAG,"Flammenmoment rejected: count=%d",count);
                     return false;
                 }
 
-                ESP_LOGI(TAG,"AI requested Flammenmoment with %d flame(s)",count);
+                if(count==0){
+                    uint8_t selected=SetRandomFlameMoment();
+                    ESP_LOGI(TAG,"Flammenmoment MCP random result=%d",selected);
+                    return std::to_string(selected);
+                }
 
                 SetFlameMoment((uint8_t)count);
-                return true;
+                ESP_LOGI(TAG,"Flammenmoment MCP contextual result=%d",count);
+                return std::to_string(count);
             }
         );
-#endif
+        #endif
 
         // ------------------------------------------------------------------------
         // HMB|TEC Lichtblick prompt
@@ -670,25 +701,20 @@ private:
                     "Atemlicht in dieser Farbe. "
                     "Falls kein Licht-Tool verfuegbar ist, fahre ohne Lichtaktion fort. ";
 
-#if HMB_FLAME_EN
-                prompt+=
-                    "Erzeuge ausserdem einen Flammenmoment. "
-                    "Waehle dafuer bewusst eine Anzahl von einer bis vier Flammen. "
-                    "Pruefe zuerst, ob es einen echten und natuerlichen Grund fuer eine bestimmte Anzahl gibt. "
-                    "Das kann beispielsweise ein tatsaechliches Datum, ein reales Kalendereignis, "
-                    "die Jahreszeit oder ein sinnvoller Bezug aus dem Gespraech sein. "
-                    "Wenn ein solcher Zusammenhang besteht, waehle die dazu passende Anzahl. "
-                    "Beispiel: Am vierten Advent koennen vier Flammen eine natuerliche Bedeutung haben. "
-                    "Erfinde niemals ein Datum, einen Feiertag, ein Ereignis oder einen anderen "
-                    "angeblichen Fakt, nur um die Anzahl zu begruenden. "
-                    "Wenn kein echter Zusammenhang fuer eine bestimmte Anzahl besteht, "
-                    "waehle frei eine Zahl zwischen eins und vier und gib ihr eine kleine positive, "
-                    "poetische oder zum Lichtblick passende Bedeutung. "
-                    "Die Begruendung soll kurz, freundlich, natuerlich und nicht konstruiert wirken. "
-                    "Rufe self.flame.moment mit der gewaehlten Anzahl auf. "
-                    "Erwaehne die gewaehlte Anzahl und ihre Bedeutung natuerlich im gesprochenen Lichtblick. ";
-#endif
-
+            #if HMB_FLAME_EN
+                            prompt+=
+                                "Erzeuge ausserdem einen Flammenmoment. "
+                                "Pruefe zuerst, ob es einen echten konkreten Grund fuer genau eine, zwei, drei oder vier Flammen gibt. "
+                                "Ein solcher Grund darf nur aus einem tatsaechlichen Datum, einem realen Kalendereignis "
+                                "oder einem eindeutigen Bezug aus dem aktuellen Gespraech entstehen. "
+                                "Wenn ein solcher echter Grund besteht, rufe self.flame.moment mit count 1, 2, 3 oder 4 auf. "
+                                "Wenn kein solcher eindeutiger Zahlenbezug besteht, rufe self.flame.random_moment auf. "
+                                "Bei self.flame.random_moment darfst du keine Anzahl selbst bestimmen. "
+                                "Das Geraet waehlt dann zufaellig zwischen einer und vier Flammen. "
+                                "Das Tool gibt die tatsaechlich gewaehlte Anzahl zurueck. "
+                                "Beziehe genau diese zurueckgegebene Anzahl kurz und natuerlich in den gesprochenen Lichtblick ein. "
+                                "Erfinde niemals einen Fakt oder Zusammenhang, um self.flame.moment statt self.flame.random_moment zu verwenden. ";
+            #endif
                 prompt+=
                     "Sprich anschliessend den Lichtblick direkt aus.";
 

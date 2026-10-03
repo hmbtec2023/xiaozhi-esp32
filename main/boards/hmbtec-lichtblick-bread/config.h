@@ -57,11 +57,9 @@
 #define HMBTEC_IR_RX_GPIO        GPIO_NUM_18   // TX -> IR receiver 
 //--- HEX/BCD-ModeSelect-RotarySwitch
 #define HMBTEC_PIO_HEXSW_1       GPIO_NUM_11  
-#define HMBTEC_PIO_HEXSW_2       GPIO_NUM_12  
-#define HMBTEC_PIO_HEXSW_4       GPIO_NUM_13  
-#define HMBTEC_PIO_HEXSW_8       GPIO_NUM_14  
+#define HMBTEC_PIO_HEXSW_2       GPIO_NUM_12   
 
-#define HMB_FLAME_EN 1 // 0 = Flammenmoment deaktiviert, 1 = aktiviert
+#define HMB_FLAME_EN 1
 #define HMB_FLAME_1 11  // highActive
 #define HMB_FLAME_2 12  // highActive
 #define HMB_FLAME_3 13  // highActive
