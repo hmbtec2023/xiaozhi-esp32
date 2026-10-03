@@ -66,7 +66,7 @@
 #define HMB_FLAME_2 12  // highActive
 #define HMB_FLAME_3 13  // highActive
 #define HMB_FLAME_4 14  // highActive
-
+ 
 #define SEELSORGE_EN             0 // 0 = kurz -> Lichtblick lang halten = Chat; 1 = kurz -> Seelsorge, lang -> chat 
 
 #endif // _BOARD_CONFIG_H_
