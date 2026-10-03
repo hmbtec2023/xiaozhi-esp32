@@ -3,14 +3,10 @@
 ## Board wechseln
 
 ### Lichtblick Bread
-python3 scripts/build.py hmbtec-lichtblick-bread --language de-DE
+python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64 --language de-DE
 
-Auswahl:
-2 = 128x64 OLED
 
-### DualEye
-python3 scripts/build.py hmbtec-dualeye --language de-DE
-
+grep "CONFIG_BOARD_TYPE_HMBTEC_DUALEYE" sdkconfig
 ### BOARD_TYPE_HMBTEC_SPOTPEAR_128
 python3 scripts/build.py hmbtec/hmbtec-spotpear-128 --language de-DE
 
@@ -23,11 +19,18 @@ cd "$HOME/Desktop/OGG_Soundfiles" && mkdir -p audio && for f in *.mp3; do [ -e "
 
 ----
 
+## ESP-IDF aktivieren
+source /Users/hmb/.espressif/tools/activate_idf_v6.1.sh
+
 ## Aktuelles Board prüfen
 grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 
-## ESP-IDF aktivieren
-source /Users/hmb/.espressif/tools/activate_idf_v6.1.sh
+## Build
+python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64 --language de-DE
+
+## Flashen
+ ls /dev/cu.usbmodem*
+ python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 16MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x20000 build/xiaozhi.bin 0x800000 build/generated_assets.bin
 
 ## Merker
 Boardwechsel immer über scripts/build.py.

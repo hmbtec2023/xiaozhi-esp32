@@ -45,6 +45,11 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
 
+## HMB Add Arduino-ESP32 to the list of required components if the board type is HMBTEC_LICHTBLICK_BREAD
+if(CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK_BREAD)
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA arduino-esp32)
+endif()
+
 # Add board common files
 list(APPEND SOURCES
     "boards/common/board.cc"

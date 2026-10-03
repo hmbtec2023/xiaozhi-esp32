@@ -6,27 +6,20 @@
 #define AUDIO_INPUT_SAMPLE_RATE  16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000
 
-// 如果使用 Duplex I2S 模式，请注释下面一行
 #define AUDIO_I2S_METHOD_SIMPLEX
-
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
-
-#define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
-#define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
-#define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
-#define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7
-#define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_15
-#define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_16
-
+    #define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
+    #define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
+    #define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
+    #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7
+    #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_15
+    #define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_16
 #else
-
-#define AUDIO_I2S_GPIO_WS GPIO_NUM_4
-#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_5
-#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_6
-#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_7
-
+    #define AUDIO_I2S_GPIO_WS GPIO_NUM_4
+    #define AUDIO_I2S_GPIO_BCLK GPIO_NUM_5
+    #define AUDIO_I2S_GPIO_DIN  GPIO_NUM_6
+    #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_7
 #endif
-
 
 #define BUILTIN_LED_GPIO        GPIO_NUM_48
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
@@ -68,7 +61,12 @@
 #define HMBTEC_PIO_HEXSW_4       GPIO_NUM_13  
 #define HMBTEC_PIO_HEXSW_8       GPIO_NUM_14  
 
-#define SEELSORGE_EN             1
+#define HMB_FLAME_EN 1 // 0 = Flammenmoment deaktiviert, 1 = aktiviert
+#define HMB_FLAME_1 11  // highActive
+#define HMB_FLAME_2 12  // highActive
+#define HMB_FLAME_3 13  // highActive
+#define HMB_FLAME_4 14  // highActive
 
+#define SEELSORGE_EN             0 // 0 = kurz -> Lichtblick lang halten = Chat; 1 = kurz -> Seelsorge, lang -> chat 
 
 #endif // _BOARD_CONFIG_H_
