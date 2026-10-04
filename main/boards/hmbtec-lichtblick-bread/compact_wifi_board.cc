@@ -461,108 +461,91 @@ private:
     // HMB|TEC Flame control / Flammenmoment
     // ------------------------------------------------------------------------
     void SetAllFlames(bool on){
+#ifdef SINGLE_FLAME_EN
+        gpio_set_level((gpio_num_t)HMB_FLAME_1,on ? 1 : 0);
+        ESP_LOGI(TAG,"SINGLE FLAME -> %s",on ? "ON" : "OFF");
+#else
         gpio_set_level((gpio_num_t)HMB_FLAME_1,on ? 1 : 0);
         gpio_set_level((gpio_num_t)HMB_FLAME_2,on ? 1 : 0);
         gpio_set_level((gpio_num_t)HMB_FLAME_3,on ? 1 : 0);
         gpio_set_level((gpio_num_t)HMB_FLAME_4,on ? 1 : 0);
-
         ESP_LOGI(TAG,"FLAME ALL -> %s",on ? "ON" : "OFF");
+#endif
     }
-
     void SetFlame(uint8_t flame,bool on){
+#ifdef SINGLE_FLAME_EN
+        if(flame!=1){
+            ESP_LOGW(TAG,"SINGLE FLAME invalid number: %d",flame);
+            return;
+        }
+        gpio_set_level((gpio_num_t)HMB_FLAME_1,on ? 1 : 0);
+        ESP_LOGI(TAG,"SINGLE FLAME -> %s",on ? "ON" : "OFF");
+#else
         gpio_num_t gpio;
-
         switch(flame){
-            case 1:
-                gpio=(gpio_num_t)HMB_FLAME_1;
-                break;
-
-            case 2:
-                gpio=(gpio_num_t)HMB_FLAME_2;
-                break;
-
-            case 3:
-                gpio=(gpio_num_t)HMB_FLAME_3;
-                break;
-
-            case 4:
-                gpio=(gpio_num_t)HMB_FLAME_4;
-                break;
-
+            case 1: gpio=(gpio_num_t)HMB_FLAME_1; break;
+            case 2: gpio=(gpio_num_t)HMB_FLAME_2; break;
+            case 3: gpio=(gpio_num_t)HMB_FLAME_3; break;
+            case 4: gpio=(gpio_num_t)HMB_FLAME_4; break;
             default:
                 ESP_LOGW(TAG,"Invalid FLAME number: %d",flame);
                 return;
         }
-
         gpio_set_level(gpio,on ? 1 : 0);
         ESP_LOGI(TAG,"FLAME %d -> %s",flame,on ? "ON" : "OFF");
+#endif
     }
-
+#ifndef SINGLE_FLAME_EN
     void SetFlameMoment(uint8_t count){
         if(count<1 || count>4){
             ESP_LOGW(TAG,"Flammenmoment invalid count: %d",count);
             return;
         }
-
         SetAllFlames(false);
-
-        // Die KI bestimmt die Anzahl der Flammen.
-        // Der Controller bestimmt zufällig, welche konkreten Flammen leuchten.
         uint8_t mask=0;
-
         while(__builtin_popcount((unsigned int)mask)<count){
             mask|=(1U<<(esp_random()%4));
         }
-
         for(uint8_t i=0;i<4;i++){
             if(mask&(1U<<i)){
                 SetFlame(i+1,true);
             }
         }
-
         ESP_LOGI(TAG,"Flammenmoment -> count=%d mask=0x%02X",count,mask);
     }
-
     uint8_t SetRandomFlameMoment(){
         uint8_t count=(uint8_t)((esp_random()%4)+1);
         ESP_LOGI(TAG,"Flammenmoment random selection -> %d",count);
         SetFlameMoment(count);
         return count;
     }
-
+#endif
     void InitializeFlames(){
-        ESP_LOGI(
-            TAG,
-            "Initialize FLAME outputs: GPIO%d, GPIO%d, GPIO%d, GPIO%d",
-            HMB_FLAME_1,
-            HMB_FLAME_2,
-            HMB_FLAME_3,
-            HMB_FLAME_4
-        );
-
+#ifdef SINGLE_FLAME_EN
+        ESP_LOGI(TAG,"Initialize SINGLE FLAME output: GPIO%d",HMB_FLAME_1);
         gpio_config_t flame_cfg={};
-        flame_cfg.pin_bit_mask=
-            (1ULL<<HMB_FLAME_1) |
-            (1ULL<<HMB_FLAME_2) |
-            (1ULL<<HMB_FLAME_3) |
-            (1ULL<<HMB_FLAME_4);
+        flame_cfg.pin_bit_mask=(1ULL<<HMB_FLAME_1);
+#else
+        ESP_LOGI(TAG,"Initialize FLAME outputs: GPIO%d, GPIO%d, GPIO%d, GPIO%d",HMB_FLAME_1,HMB_FLAME_2,HMB_FLAME_3,HMB_FLAME_4);
+        gpio_config_t flame_cfg={};
+        flame_cfg.pin_bit_mask=(1ULL<<HMB_FLAME_1) | (1ULL<<HMB_FLAME_2) | (1ULL<<HMB_FLAME_3) | (1ULL<<HMB_FLAME_4);
+#endif
         flame_cfg.mode=GPIO_MODE_OUTPUT;
         flame_cfg.pull_up_en=GPIO_PULLUP_DISABLE;
         flame_cfg.pull_down_en=GPIO_PULLDOWN_DISABLE;
         flame_cfg.intr_type=GPIO_INTR_DISABLE;
-
         ESP_ERROR_CHECK(gpio_config(&flame_cfg));
-
         SetAllFlames(false);
-
-        // Kurzer Startup-Test.
+#ifdef SINGLE_FLAME_EN
+        SetFlame(1,true);
+        vTaskDelay(pdMS_TO_TICKS(200));
+#else
         for(uint8_t i=1;i<=4;i++){
             SetFlame(i,true);
             vTaskDelay(pdMS_TO_TICKS(200));
         }
-
+#endif
         SetAllFlames(false);
-
         ESP_LOGI(TAG,"FLAME startup test finished");
     }
 #endif
@@ -576,15 +559,40 @@ private:
 
         auto& mcp_server=McpServer::GetInstance();
 
-        #if HMB_FLAME_EN
+#if HMB_FLAME_EN
+#ifdef SINGLE_FLAME_EN
         // ------------------------------------------------------------------------
-        // HMB|TEC direct flame control
-        //
-        // Beispiele:
-        // "Schalte Flamme 1 ein."
-        // "Mach Flamme 3 aus."
-        // "Schalte alle Flammen ein."
-        // "Alle Flammen aus."
+        // HMB|TEC Single Flame tools
+        // ------------------------------------------------------------------------
+        mcp_server.AddTool(
+            "self.flame.set",
+            "Controls the single physical flame directly. "
+            "Use this tool when the user explicitly asks to switch the flame on or off.",
+            PropertyList({
+                Property("on",kPropertyTypeBoolean)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                bool on=properties["on"].value<bool>();
+                SetFlame(1,on);
+                return true;
+            }
+        );
+        mcp_server.AddTool(
+            "self.flame.moment",
+            "Creates an HMBTEC Flammenmoment with the single physical flame. "
+            "Use this tool when a Lichtblick should be accompanied by the flame. "
+            "There is exactly one physical flame. Never describe or imply multiple flames.",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                SetAllFlames(false);
+                SetFlame(1,true);
+                ESP_LOGI(TAG,"SINGLE FLAME moment -> ON");
+                return true;
+            }
+        );
+#else
+        // ------------------------------------------------------------------------
+        // HMB|TEC Multi Flame tools
         // ------------------------------------------------------------------------
         mcp_server.AddTool(
             "self.flame.set",
@@ -598,26 +606,17 @@ private:
             [this](const PropertyList& properties) -> ReturnValue {
                 int flame=properties["flame"].value<int>();
                 bool on=properties["on"].value<bool>();
-
                 if(flame==0){
                     SetAllFlames(on);
                     return true;
                 }
-
                 if(flame<1 || flame>4){
                     return false;
                 }
-
                 SetFlame((uint8_t)flame,on);
                 return true;
             }
         );
-        // ------------------------------------------------------------------------
-        // HMB|TEC automatischer Flammenmoment
-        //
-        // Keine Anzahl von der KI.
-        // Der Controller bestimmt zufällig 1..4.
-        // ------------------------------------------------------------------------
         mcp_server.AddTool(
             "self.flame.random_moment",
             "Creates a random HMBTEC Flammenmoment. "
@@ -632,12 +631,6 @@ private:
                 return std::to_string(selected);
             }
         );
-        // ------------------------------------------------------------------------
-        // HMB|TEC Flammenmoment
-        //
-        // count 1..4 = KI hat einen echten semantischen Grund für die Anzahl.
-        // count 0    = Controller wählt zufällig 1..4.
-        // ------------------------------------------------------------------------
         mcp_server.AddTool(
             "self.flame.moment",
             "Creates an HMBTEC Flammenmoment. "
@@ -651,26 +644,23 @@ private:
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 int count=properties["count"].value<int>();
-
                 ESP_LOGI(TAG,"Flammenmoment MCP received count=%d",count);
-
                 if(count<0 || count>4){
                     ESP_LOGW(TAG,"Flammenmoment rejected: count=%d",count);
                     return false;
                 }
-
                 if(count==0){
                     uint8_t selected=SetRandomFlameMoment();
                     ESP_LOGI(TAG,"Flammenmoment MCP random result=%d",selected);
                     return std::to_string(selected);
                 }
-
                 SetFlameMoment((uint8_t)count);
                 ESP_LOGI(TAG,"Flammenmoment MCP contextual result=%d",count);
                 return std::to_string(count);
             }
         );
-        #endif
+#endif
+#endif
 
         // ------------------------------------------------------------------------
         // HMB|TEC Lichtblick prompt
@@ -701,20 +691,31 @@ private:
                     "Atemlicht in dieser Farbe. "
                     "Falls kein Licht-Tool verfuegbar ist, fahre ohne Lichtaktion fort. ";
 
-            #if HMB_FLAME_EN
-                            prompt+=
-                                "Erzeuge ausserdem einen Flammenmoment. "
-                                "Pruefe zuerst, ob es einen echten konkreten Grund fuer genau eine, zwei, drei oder vier Flammen gibt. "
-                                "Ein solcher Grund darf nur aus einem tatsaechlichen Datum, einem realen Kalendereignis "
-                                "oder einem eindeutigen Bezug aus dem aktuellen Gespraech entstehen. "
-                                "Wenn ein solcher echter Grund besteht, rufe self.flame.moment mit count 1, 2, 3 oder 4 auf. "
-                                "Wenn kein solcher eindeutiger Zahlenbezug besteht, rufe self.flame.random_moment auf. "
-                                "Bei self.flame.random_moment darfst du keine Anzahl selbst bestimmen. "
-                                "Das Geraet waehlt dann zufaellig zwischen einer und vier Flammen. "
-                                "Das Tool gibt die tatsaechlich gewaehlte Anzahl zurueck. "
-                                "Beziehe genau diese zurueckgegebene Anzahl kurz und natuerlich in den gesprochenen Lichtblick ein. "
-                                "Erfinde niemals einen Fakt oder Zusammenhang, um self.flame.moment statt self.flame.random_moment zu verwenden. ";
-            #endif
+#if HMB_FLAME_EN
+#ifdef SINGLE_FLAME_EN
+                prompt+=
+                    "Begleite den Lichtblick ausserdem mit einem Flammenmoment. "
+                    "Es existiert genau eine physische Flamme. "
+                    "Rufe dafuer self.flame.moment auf. "
+                    "Die Flamme ist ein ruhiges symbolisches Licht und keine Anzahl oder Auswahl. "
+                    "Sprich daher immer nur von einer Flamme oder einem kleinen Licht. "
+                    "Erwaehne niemals mehrere Flammen und erfinde keine Anzahl. "
+                    "Beziehe die einzelne Flamme nur dann sprachlich ein, wenn es natuerlich zum Lichtblick passt. ";
+#else
+                prompt+=
+                    "Erzeuge ausserdem einen Flammenmoment. "
+                    "Pruefe zuerst, ob es einen echten konkreten Grund fuer genau eine, zwei, drei oder vier Flammen gibt. "
+                    "Ein solcher Grund darf nur aus einem tatsaechlichen Datum, einem realen Kalendereignis "
+                    "oder einem eindeutigen Bezug aus dem aktuellen Gespraech entstehen. "
+                    "Wenn ein solcher echter Grund besteht, rufe self.flame.moment mit count 1, 2, 3 oder 4 auf. "
+                    "Wenn kein solcher eindeutiger Zahlenbezug besteht, rufe self.flame.random_moment auf. "
+                    "Bei self.flame.random_moment darfst du keine Anzahl selbst bestimmen. "
+                    "Das Geraet waehlt dann zufaellig zwischen einer und vier Flammen. "
+                    "Das Tool gibt die tatsaechlich gewaehlte Anzahl zurueck. "
+                    "Beziehe genau diese zurueckgegebene Anzahl kurz und natuerlich in den gesprochenen Lichtblick ein. "
+                    "Erfinde niemals einen Fakt oder Zusammenhang, um self.flame.moment statt self.flame.random_moment zu verwenden. ";
+#endif
+#endif
                 prompt+=
                     "Sprich anschliessend den Lichtblick direkt aus.";
 

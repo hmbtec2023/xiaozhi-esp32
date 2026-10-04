@@ -60,11 +60,11 @@
 #define HMBTEC_PIO_HEXSW_2       GPIO_NUM_12   
 
 #define HMB_FLAME_EN 1
+#define SINGLE_FLAME_EN 1 // 1 = only flame 1 is used, 0 = all flames are used
 #define HMB_FLAME_1 11  // highActive
 #define HMB_FLAME_2 12  // highActive
 #define HMB_FLAME_3 13  // highActive
 #define HMB_FLAME_4 14  // highActive
- 
 #define SEELSORGE_EN             0 // 0 = kurz -> Lichtblick lang halten = Chat; 1 = kurz -> Seelsorge, lang -> chat 
 
 #endif // _BOARD_CONFIG_H_
