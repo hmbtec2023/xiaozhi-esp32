@@ -29,6 +29,7 @@
 #include <cstring>
 #endif
 #include "ir_remote_controller.h"
+#include <utility>
 
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
@@ -53,6 +54,9 @@ private:
     bool lichtblick_ptt_active_=false;
     bool lichtblick_effect_active_=false;
     bool ptt_interaction_active_=false;
+    bool lichtblick_ptt_speech_detected_=false;
+    bool lichtblick_empty_ptt_pending_=false;
+    esp_timer_handle_t lichtblick_empty_ptt_timer_=nullptr;
 
     // ------------------------------------------------------------------------
     // HMB|TEC IR light control
@@ -190,6 +194,11 @@ private:
             ESP_LOGI(TAG,"Lichtblick long press -> Seelsorge PTT start");
         #else
             ESP_LOGI(TAG,"Lichtblick long press -> PTT start");
+            lichtblick_ptt_speech_detected_=false;
+            lichtblick_empty_ptt_pending_=false;
+            if(lichtblick_empty_ptt_timer_!=nullptr){
+                esp_timer_stop(lichtblick_empty_ptt_timer_);
+            }
         #endif
             lichtblick_ptt_active_=true;
             ptt_interaction_active_=true;
@@ -209,6 +218,7 @@ private:
             ESP_LOGI(TAG,"Lichtblick Seelsorge PTT released -> stop listening");
         #else
             ESP_LOGI(TAG,"Lichtblick PTT released -> stop listening");
+            lichtblick_empty_ptt_pending_=true;
         #endif
             lichtblick_ptt_active_=false;
         #if HMB_PWA_STATS_EN && SEELSORGE_EN
@@ -216,6 +226,19 @@ private:
         #endif
             auto& app=Application::GetInstance();
             app.StopListening();
+
+        #if !SEELSORGE_EN
+            if(lichtblick_empty_ptt_timer_!=nullptr){
+                esp_timer_stop(lichtblick_empty_ptt_timer_);
+                esp_err_t err=esp_timer_start_once(lichtblick_empty_ptt_timer_,1200*1000);
+                if(err==ESP_OK){
+                    ESP_LOGI(TAG,"Empty PTT check armed for 1200 ms");
+                }else{
+                    ESP_LOGW(TAG,"Empty PTT timer start failed: %s",esp_err_to_name(err));
+                    lichtblick_empty_ptt_pending_=false;
+                }
+            }
+        #endif
         });
 
         volume_up_button_.OnClick([this](){
@@ -367,6 +390,15 @@ private:
 #endif
         auto& app=Application::GetInstance();
         app.WakeWordInvoke("HMBPROMPT",true);
+    }
+
+    void TriggerExtendedLichtblick(){
+        ESP_LOGI(TAG,"Extended Lichtblick triggered");
+#if HMB_PWA_STATS_EN
+        SendPwaEvent("lichtblick");
+#endif
+        auto& app=Application::GetInstance();
+        app.WakeWordInvoke("HMBPROMPT_LONG",true);
     }
 
     void TriggerSeelsorge(){
@@ -784,6 +816,42 @@ private:
         );
 
         // ------------------------------------------------------------------------
+        // HMB|TEC Extended Lichtblick prompt
+        // ------------------------------------------------------------------------
+        mcp_server.AddTool(
+            "self.hmbtec.get_extended_prompt",
+            "When the user input is exactly HMBPROMPT_LONG, always call this tool. "
+            "The returned text contains an instruction that must be executed. "
+            "Do not mention HMBPROMPT_LONG or this tool to the user. "
+            "Follow the returned instruction and answer directly.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                ESP_LOGI("HmbtecPrompt","AI requested extended firmware prompt");
+                std::string prompt=
+                    "Erzeuge jetzt einen etwas laengeren persoenlichen Lichtblick fuer den Nutzer. "
+                    "Formuliere einen ruhigen, positiven und unterstuetzenden Gedanken mit etwas mehr Tiefe als beim normalen Lichtblick. "
+                    "Antworte auf Deutsch und stelle keine Rueckfrage. "
+                    "Formuliere etwa vier bis sechs natuerliche Saetze. "
+                    "Nutze bekannten Gespraechskontext, sofern er sinnvoll passt, und beruecksichtige nach Moeglichkeit Tageszeit und Jahreszeit. "
+                    "Vermeide Floskeln, Belehrungen und uebertriebene Motivation. "
+                    "Gib dem Nutzer einen kleinen konkreten Gedanken oder Impuls mit, den er fuer die naechsten Minuten mitnehmen kann. "
+                    "Waehle passend zum Inhalt eine Lichtfarbe und aktiviere, falls verfuegbar, self.light.breathe. ";
+#if HMB_FLAME_EN
+#ifdef SINGLE_FLAME_EN
+                prompt+=
+                    "Begleite den Lichtblick mit einem einzelnen ruhigen Flammenmoment ueber self.flame.moment. "
+                    "Sprich nur dann von der Flamme oder einem kleinen Licht, wenn es natuerlich zum Inhalt passt. ";
+#else
+                prompt+=
+                    "Begleite den Lichtblick mit einem passenden Flammenmoment. Nutze self.flame.moment nur bei einem echten konkreten Zahlenbezug, sonst self.flame.random_moment. ";
+#endif
+#endif
+                prompt+="Sprich anschliessend den Lichtblick direkt aus.";
+                return prompt;
+            }
+        );
+
+        // ------------------------------------------------------------------------
         // HMB|TEC Seelsorge prompt
         // ------------------------------------------------------------------------
         mcp_server.AddTool(
@@ -842,6 +910,19 @@ private:
 
         auto& app=Application::GetInstance();
 
+#if !SEELSORGE_EN
+        app.RegisterSttCallback([this](const std::string& text){
+            if((lichtblick_ptt_active_ || lichtblick_empty_ptt_pending_) && !text.empty()){
+                lichtblick_ptt_speech_detected_=true;
+                lichtblick_empty_ptt_pending_=false;
+                if(lichtblick_empty_ptt_timer_!=nullptr){
+                    esp_timer_stop(lichtblick_empty_ptt_timer_);
+                }
+                ESP_LOGI(TAG,"PTT speech detected -> extended Lichtblick cancelled");
+            }
+        });
+#endif
+
         app.RegisterStateChangeListener([this](DeviceState old_state,DeviceState new_state){
             ESP_LOGI(
                 TAG,
@@ -891,6 +972,26 @@ public:
         }else{
             display_=new NoDisplay();
         }
+
+#if !SEELSORGE_EN
+        esp_timer_create_args_t empty_ptt_timer_args={
+            .callback=[](void* arg){
+                auto* board=static_cast<CompactWifiBoard*>(arg);
+                Application::GetInstance().Schedule([board](){
+                    if(!board->lichtblick_empty_ptt_pending_) return;
+                    board->lichtblick_empty_ptt_pending_=false;
+                    if(board->lichtblick_ptt_active_ || board->lichtblick_ptt_speech_detected_) return;
+                    ESP_LOGI(TAG,"Empty PTT -> extended Lichtblick");
+                    board->TriggerExtendedLichtblick();
+                });
+            },
+            .arg=this,
+            .dispatch_method=ESP_TIMER_TASK,
+            .name="hmb_empty_ptt",
+            .skip_unhandled_events=true,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&empty_ptt_timer_args,&lichtblick_empty_ptt_timer_));
+#endif
 
         InitializeButtons();
 

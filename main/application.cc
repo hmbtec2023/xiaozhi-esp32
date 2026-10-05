@@ -1016,6 +1016,10 @@ void Application::InitializeProtocol() {
                         text->valuestring
                     );
 
+                    if (stt_callback_ && text->valuestring != nullptr && text->valuestring[0] != '\0') {
+                        stt_callback_(text->valuestring);
+                    }
+
                     Schedule(
                         [display,
                          message =
@@ -2344,6 +2348,10 @@ bool Application::UpgradeFirmware(
  */
 void Application::RegisterOneShotFinishedCallback(std::function<void()> callback) {
     one_shot_finished_callback_ = std::move(callback);
+}
+
+void Application::RegisterSttCallback(std::function<void(const std::string&)> callback) {
+    stt_callback_ = std::move(callback);
 }
 
 int Application::RegisterStateChangeListener(std::function<void(DeviceState, DeviceState)> callback) {
