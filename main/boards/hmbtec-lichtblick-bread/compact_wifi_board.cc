@@ -175,13 +175,13 @@ private:
         //   Push-to-Talk beenden
         // ------------------------------------------------------------------------
         lichtblick_button_.OnClick([this](){
-#if SEELSORGE_EN
-            ESP_LOGI(TAG,"Lichtblick button -> Seelsorge");
-            TriggerSeelsorge();
-#else
-            ESP_LOGI(TAG,"Lichtblick button -> Lichtblick");
-            TriggerLichtblick();
-#endif
+        #if SEELSORGE_EN
+                    ESP_LOGI(TAG,"Lichtblick button -> Seelsorge");
+                    TriggerSeelsorge();
+        #else
+                    ESP_LOGI(TAG,"Lichtblick button -> Lichtblick");
+                    TriggerLichtblick();
+        #endif
         });
 
         lichtblick_button_.OnLongPress([this](){
@@ -189,6 +189,10 @@ private:
 
             lichtblick_ptt_active_=true;
             ptt_interaction_active_=true;
+
+            #if HMB_PWA_STATS_EN
+                        SendPwaEvent("seelsorger_start");
+            #endif
 
             if(pixel_ring_!=nullptr){
                 pixel_ring_->SetAllColor({0,0,0});
@@ -205,6 +209,10 @@ private:
 
             ESP_LOGI(TAG,"Lichtblick PTT released -> stop listening");
             lichtblick_ptt_active_=false;
+
+            #if HMB_PWA_STATS_EN
+                        SendPwaEvent("seelsorger_end");
+            #endif
 
             auto& app=Application::GetInstance();
             app.StopListening();
