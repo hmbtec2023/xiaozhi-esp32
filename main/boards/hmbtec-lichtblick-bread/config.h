@@ -67,4 +67,10 @@
 #define HMB_FLAME_4 14  // highActive
 #define SEELSORGE_EN             0 // 0 = kurz -> Lichtblick lang halten = Chat; 1 = kurz -> Seelsorge, lang -> chat 
 
+//--- HMB|TEC PWA Statistics - first test
+#define HMB_PWA_STATS_EN         1
+#if HMB_PWA_STATS_EN
+    #define HMB_PWA_STATS_URL    "https://mypwa.hmbtec.de/2026/LichtblickStats/api/event.php"
+#endif
+
 #endif // _BOARD_CONFIG_H_

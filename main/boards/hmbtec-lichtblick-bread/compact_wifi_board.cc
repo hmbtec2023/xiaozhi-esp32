@@ -19,6 +19,15 @@
 #include <esp_timer.h>
 #include <esp_random.h>
 #include <ctime>
+#if HMB_PWA_STATS_EN
+#include <esp_http_client.h>
+#include <esp_crt_bundle.h>
+#include <esp_mac.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <cstdio>
+#include <cstring>
+#endif
 #include "ir_remote_controller.h"
 
 #ifdef SH1106
@@ -302,9 +311,56 @@ private:
         pixel_ring_->SetAllColor({0,0,0});
     }
 
+#if HMB_PWA_STATS_EN
+    static void PwaEventTask(void* parameter){
+        char* event=static_cast<char*>(parameter);
+        uint8_t mac[6]={0};
+        esp_read_mac(mac,ESP_MAC_WIFI_STA);
+        char device_id[32];
+        snprintf(device_id,sizeof(device_id),"HMB-%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+        char json[192];
+        snprintf(json,sizeof(json),"{\"device_id\":\"%s\",\"event\":\"%s\"}",device_id,event);
+        esp_http_client_config_t config={};
+        config.url=HMB_PWA_STATS_URL;
+        config.method=HTTP_METHOD_POST;
+        config.timeout_ms=5000;
+        config.crt_bundle_attach=esp_crt_bundle_attach;
+        esp_http_client_handle_t client=esp_http_client_init(&config);
+        if(client!=nullptr){
+            esp_http_client_set_header(client,"Content-Type","application/json");
+            esp_http_client_set_post_field(client,json,strlen(json));
+            esp_err_t err=esp_http_client_perform(client);
+            if(err==ESP_OK){
+                ESP_LOGI(TAG,"PWA event '%s' -> HTTP %d",event,esp_http_client_get_status_code(client));
+            }else{
+                ESP_LOGW(TAG,"PWA event '%s' failed: %s",event,esp_err_to_name(err));
+            }
+            esp_http_client_cleanup(client);
+        }
+        free(event);
+        vTaskDelete(nullptr);
+    }
+
+    void SendPwaEvent(const char* event){
+        if(event==nullptr || event[0]=='\0') return;
+        char* event_copy=strdup(event);
+        if(event_copy==nullptr){
+            ESP_LOGW(TAG,"PWA event allocation failed");
+            return;
+        }
+        BaseType_t result=xTaskCreate(PwaEventTask,"hmb_pwa_event",6144,event_copy,2,nullptr);
+        if(result!=pdPASS){
+            ESP_LOGW(TAG,"PWA event task creation failed");
+            free(event_copy);
+        }
+    }
+#endif
+
     void TriggerLichtblick(){
         ESP_LOGI(TAG,"Lichtblick triggered");
-
+#if HMB_PWA_STATS_EN
+        SendPwaEvent("lichtblick");
+#endif
         auto& app=Application::GetInstance();
         app.WakeWordInvoke("HMBPROMPT",true);
     }
