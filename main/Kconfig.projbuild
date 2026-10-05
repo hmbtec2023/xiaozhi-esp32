@@ -1,5 +1,12 @@
 menu "Xiaozhi Assistant"
 
+config HMB_PTT_ONLY_MIC
+bool "HMB PTT-only microphone"
+default n
+help
+    Disables idle wake-word microphone operation.
+    The microphone input is enabled only when required for PTT.
+
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"

@@ -59,6 +59,7 @@
 #define HMBTEC_PIO_HEXSW_1       GPIO_NUM_11  
 #define HMBTEC_PIO_HEXSW_2       GPIO_NUM_12   
 
+#define HMB_PTT_ONLY_MIC 1  // Mikrofon nur bei aktiver PTT-Nutzung
 #define HMB_FLAME_EN 1
 #define SINGLE_FLAME_EN 1 // 1 = only flame 1 is used, 0 = all flames are used
 #define HMB_FLAME_1 11  // highActive

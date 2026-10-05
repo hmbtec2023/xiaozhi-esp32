@@ -138,6 +138,7 @@ public:
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
+    void RequestInputStop();
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 

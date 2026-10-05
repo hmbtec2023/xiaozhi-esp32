@@ -5,6 +5,7 @@
         {
             "name": "hmbtec-lichtblick-bread-128x64",
             "sdkconfig_append": [
+                "CONFIG_HMB_PTT_ONLY_MIC=y",
                 "CONFIG_OLED_SSD1306_128X64=y",
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
@@ -14,6 +15,7 @@
         {
             "name": "hmbtec-lichtblick-bread-128x32",
             "sdkconfig_append": [
+                "CONFIG_HMB_PTT_ONLY_MIC=y",
                 "CONFIG_OLED_SSD1306_128X32=y",
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
@@ -23,6 +25,7 @@
         {
             "name": "hmbtec-lichtblick-bread-128x64-4mb",
             "sdkconfig_append": [
+                "CONFIG_HMB_PTT_ONLY_MIC=y",
                 "CONFIG_OLED_SSD1306_128X64=y",
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_SPIRAM_MODE_QUAD=y",
@@ -33,6 +36,7 @@
         {
             "name": "hmbtec-lichtblick-bread-128x32-4mb",
             "sdkconfig_append": [
+                "CONFIG_HMB_PTT_ONLY_MIC=y",
                 "CONFIG_OLED_SSD1306_128X32=y",
                 "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                 "CONFIG_SPIRAM_MODE_QUAD=y",

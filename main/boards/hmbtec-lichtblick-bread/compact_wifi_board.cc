@@ -163,63 +163,59 @@ private:
         });
 
         // ------------------------------------------------------------------------
-        // HMB|TEC Lichtblick Button
+        // HMB|TEC Main Button
         //
-        // Short Press:
-        //   Lichtblick One-Shot
+        // SEELSORGE_EN = 0:
+        //   Short Press: Lichtblick One-Shot
+        //   Long Press:  PTT starten
+        //   Release:     PTT beenden
         //
-        // Long Press >= 700 ms:
-        //   Push-to-Talk starten
-        //
-        // Release nach Long Press:
-        //   Push-to-Talk beenden
+        // SEELSORGE_EN = 1:
+        //   Short Press: Seelsorge starten
+        //   Long Press:  PTT starten
+        //   Release:     PTT beenden
         // ------------------------------------------------------------------------
         lichtblick_button_.OnClick([this](){
         #if SEELSORGE_EN
-                    ESP_LOGI(TAG,"Lichtblick button -> Seelsorge");
-                    TriggerSeelsorge();
+            ESP_LOGI(TAG,"Lichtblick button -> Seelsorge");
+            TriggerSeelsorge();
         #else
-                    ESP_LOGI(TAG,"Lichtblick button -> Lichtblick");
-                    TriggerLichtblick();
+            ESP_LOGI(TAG,"Lichtblick button -> Lichtblick");
+            TriggerLichtblick();
         #endif
         });
 
         lichtblick_button_.OnLongPress([this](){
+        #if SEELSORGE_EN
+            ESP_LOGI(TAG,"Lichtblick long press -> Seelsorge PTT start");
+        #else
             ESP_LOGI(TAG,"Lichtblick long press -> PTT start");
-
+        #endif
             lichtblick_ptt_active_=true;
             ptt_interaction_active_=true;
-
-            #if HMB_PWA_STATS_EN
-                        SendPwaEvent("seelsorger_start");
-            #endif
-
+        #if HMB_PWA_STATS_EN && SEELSORGE_EN
+            SendPwaEvent("seelsorger_start");
+        #endif
             if(pixel_ring_!=nullptr){
                 pixel_ring_->SetAllColor({0,0,0});
             }
-
             auto& app=Application::GetInstance();
             app.StartListening();
         });
 
         lichtblick_button_.OnPressUp([this](){
-            if(!lichtblick_ptt_active_){
-                return;
-            }
-
+            if(!lichtblick_ptt_active_) return;
+        #if SEELSORGE_EN
+            ESP_LOGI(TAG,"Lichtblick Seelsorge PTT released -> stop listening");
+        #else
             ESP_LOGI(TAG,"Lichtblick PTT released -> stop listening");
+        #endif
             lichtblick_ptt_active_=false;
-
-            #if HMB_PWA_STATS_EN
-                        SendPwaEvent("seelsorger_end");
-            #endif
-
+        #if HMB_PWA_STATS_EN && SEELSORGE_EN
+            SendPwaEvent("seelsorger_end");
+        #endif
             auto& app=Application::GetInstance();
             app.StopListening();
-        });
-
-        touch_button_.OnPressDown([this](){
-            Application::GetInstance().StartListening();
         });
 
         volume_up_button_.OnClick([this](){

@@ -692,6 +692,11 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
+void AudioService::RequestInputStop(){
+    ESP_LOGI(TAG,"HMB PTT-only: requesting microphone input stop");
+    xEventGroupSetBits(event_group_,AS_EVENT_AUDIO_INPUT_STOP_REQUEST);
+}
+
 void AudioService::ReleaseWakeWordResources() {
 #if !(CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31)
     if (!audio_engine_initialized_) {

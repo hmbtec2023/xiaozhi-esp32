@@ -1778,11 +1778,14 @@ void Application::HandleStateChangedEvent() {
                 );
             }
 
-            audio_service_
-                .EnableVoiceProcessing(false);
+            audio_service_.EnableVoiceProcessing(false);
 
-            audio_service_
-                .EnableWakeWordDetection(true);
+            #if CONFIG_HMB_PTT_ONLY_MIC
+                audio_service_.EnableWakeWordDetection(false);
+                audio_service_.RequestInputStop();
+            #else
+                audio_service_.EnableWakeWordDetection(true);
+            #endif
 
             break;
 
