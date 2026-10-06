@@ -14,6 +14,7 @@ grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 
 ### Build
 python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64 --language de-DE
+python3 scripts/build.py hmbtec-talkcard --name hmbtec-talkcard --language de-DE
 
 ### Konfiguration prüfen
 grep -E "CONFIG_ESPTOOLPY_FLASHSIZE_|CONFIG_SPIRAM_MODE_(QUAD|OCT)" sdkconfig
@@ -33,6 +34,7 @@ python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before defau
 
 ### Build
 python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64-4mb --language de-DE
+python3 scripts/build.py hmbtec-talkcard --name hmbtec-talkcard-4mb --language de-DE
 
 ### Konfiguration prüfen
 grep -E "CONFIG_ESPTOOLPY_FLASHSIZE_|CONFIG_SPIRAM_MODE_(QUAD|OCT)" sdkconfig
