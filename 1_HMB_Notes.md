@@ -11,9 +11,11 @@ grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 ============================================================
 
 ## 16 MB – Octal PSRAM (XH-S3E-AI_V1.0)
-
+# ------------------------------------------
 ### Build
+## lichtblick-bread
 python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64 --language de-DE
+## talkcard
 python3 scripts/build.py hmbtec-talkcard --name hmbtec-talkcard --language de-DE
 
 ### Konfiguration prüfen
@@ -23,7 +25,7 @@ Erwartet:
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
-### Flashen
+### Flashen 16MB
 pkill -f idf_monitor.py
 ls /dev/cu.usbmodem*
 
@@ -31,9 +33,11 @@ python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before defau
 
 
 ## 4 MB – Quad PSRAM (ESP32S3 SuperMini)
-
+# ------------------------------------------
 ### Build
+## lichtblick-bread
 python3 scripts/build.py hmbtec-lichtblick-bread --name hmbtec-lichtblick-bread-128x64-4mb --language de-DE
+## talkcard
 python3 scripts/build.py hmbtec-talkcard --name hmbtec-talkcard-4mb --language de-DE
 
 ### Konfiguration prüfen
@@ -43,7 +47,7 @@ Erwartet:
 CONFIG_SPIRAM_MODE_QUAD=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-### Flashen
+### Flashen 4MB
 pkill -f idf_monitor.py
 ls /dev/cu.usbmodem*
 

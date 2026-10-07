@@ -24,6 +24,7 @@ private:
     CircularStrip* pixel_=nullptr;
     esp_timer_handle_t category_timer_=nullptr;
     uint8_t category_=0;
+    bool topic_selection_pending_=false;
     bool ptt_active_=false;
 
     void RegisterActionTool(const char* tool_name,const char* trigger,const char* label,const char* prompt){
@@ -98,12 +99,17 @@ private:
         esp_timer_stop(category_timer_);
         esp_timer_start_once(category_timer_,static_cast<uint64_t>(HMB_TC_TIMEOUT_MS)*1000ULL);
     }
+
     void ResetSelection(const char* reason){
-        if(category_==0){
+        if(category_==0 && !topic_selection_pending_){
             return;
         }
-        ESP_LOGI(TAG,"Selection reset: category=%u reason=%s",category_,reason);
+
+        ESP_LOGI(TAG,"Selection reset: category=%u pending=%d reason=%s",
+            category_,topic_selection_pending_,reason);
+
         category_=0;
+        topic_selection_pending_=false;
         SetPixel(0);
     }
 
@@ -124,11 +130,12 @@ private:
     }
 
     void HandleCorner(uint8_t key){
-        if(category_==0){
+        if(!topic_selection_pending_){
             category_=key;
+            topic_selection_pending_=true;
             SetPixel(category_);
             RestartCategoryTimer();
-            ESP_LOGI(TAG,"K%u -> category %u selected",key,category_);
+            ESP_LOGI(TAG,"K%u -> category %u selected, waiting for topic or PTT",key,category_);
             return;
         }
 
@@ -141,12 +148,13 @@ private:
 
         ESP_LOGI(TAG,"K%u -> action category=%u topic=%u",key,selected_category,topic);
 
+        topic_selection_pending_=false;
         category_=0;
         SetPixel(0);
 
         ExecuteAction(selected_category,topic);
-    }
-
+    }    
+    
     void InitializePixel(){
         ESP_LOGI(TAG,"RGB pixel: GPIO%d count=%d",HMB_TC_PIXEL_GPIO,HMB_TC_PIXEL_COUNT);
         pixel_=new CircularStrip(HMB_TC_PIXEL_GPIO,HMB_TC_PIXEL_COUNT);
@@ -177,8 +185,23 @@ private:
         button_4_.OnClick([this](){ HandleCorner(4); });
 
         ptt_button_.OnLongPress([this](){
-            ESP_LOGI(TAG,"TalkCard long press -> PTT start: category=%u",category_);
+            ESP_LOGI(TAG,"TalkCard long press -> PTT start: category=%u pending=%d",
+                category_,topic_selection_pending_);
+
             ptt_active_=true;
+
+            if(category_!=0){
+                // PTT statt zweiter K-Taste:
+                // Kategorie bleibt aktiv, 4x4-Zweitauswahl ist beendet.
+                topic_selection_pending_=false;
+
+                if(category_timer_!=nullptr){
+                    esp_timer_stop(category_timer_);
+                }
+
+                SetPixel(category_);
+            }
+
             auto& app=Application::GetInstance();
             app.StartListening();
         });
@@ -203,7 +226,7 @@ public:
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
         button_4_(HMB_TC_BUTTON_4_GPIO){
-        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.0 - 16 actions + category PTT context");
+        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.1 - 16 actions + category PTT context");
         InitializePixel();
         InitializeCategoryTimer();
         InitializeButtons();
