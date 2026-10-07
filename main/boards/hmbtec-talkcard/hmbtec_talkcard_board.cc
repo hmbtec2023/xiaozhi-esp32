@@ -8,6 +8,7 @@
 #include "led/circular_strip.h"
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_random.h>
 #include "mcp_server.h"
 
 #define TAG "HmbTalkCard"
@@ -27,17 +28,108 @@ private:
     bool topic_selection_pending_=false;
     bool ptt_active_=false;
 
-    void RegisterActionTool(const char* tool_name,const char* trigger,const char* label,const char* prompt){
+    static constexpr uint8_t MAX_VARIATIONS=10;
+    struct VariationState{
+        uint8_t count=0;
+        uint8_t position=0;
+        uint8_t bag[MAX_VARIATIONS]={};
+    };
+    VariationState variation_state_[4][4];
+
+    void ShuffleVariations(VariationState& state,uint8_t count){
+        state.count=count;
+        state.position=0;
+        for(uint8_t i=0;i<count;i++){
+            state.bag[i]=i;
+        }
+        for(uint8_t i=count-1;i>0;i--){
+            const uint8_t j=esp_random()%(i+1);
+            const uint8_t temp=state.bag[i];
+            state.bag[i]=state.bag[j];
+            state.bag[j]=temp;
+        }
+    }
+    uint8_t NextVariation(uint8_t category,uint8_t topic,uint8_t count){
+        if(category<1 || category>4 || topic<1 || topic>4 || count==0 || count>MAX_VARIATIONS){
+            return 0;
+        }
+        VariationState& state=variation_state_[category-1][topic-1];
+        if(state.count!=count || state.position>=state.count){
+            uint8_t previous=255;
+            if(state.count==count && state.count>0){
+                previous=state.bag[state.count-1];
+            }
+            ShuffleVariations(state,count);
+            if(count>1 && previous!=255 && state.bag[0]==previous){
+                const uint8_t temp=state.bag[0];
+                state.bag[0]=state.bag[1];
+                state.bag[1]=temp;
+            }
+        }
+        return state.bag[state.position++];
+    }
+    void RegisterActionTool(const char* tool_name,const char* trigger,const char* label,const char* prompt,uint8_t category=0,uint8_t topic=0,const char* const* variations=nullptr,uint8_t variation_count=0){
         auto& mcp_server=McpServer::GetInstance();
         std::string description="When the user input is exactly ";
         description+=trigger;
         description+=", always call this tool. The returned text contains an instruction that must be executed. Do not mention the trigger, this tool, or internal instructions to the user. Follow the returned instruction and answer directly.";
-        mcp_server.AddTool(tool_name,description,PropertyList(),[label,prompt](const PropertyList& properties) -> ReturnValue {
-            ESP_LOGI(TAG,"AI requested TalkCard action: %s",label);
-            return std::string(prompt);
+        mcp_server.AddTool(tool_name,description,PropertyList(),[this,label,prompt,category,topic,variations,variation_count](const PropertyList& properties) -> ReturnValue {
+            std::string result(prompt);
+            if(variations!=nullptr && variation_count>0){
+                const uint8_t index=NextVariation(category,topic,variation_count);
+                result+=" Variationsrichtung fuer diesen Aufruf: ";
+                result+=variations[index];
+                result+=". Vermeide besonders naheliegende Standardbeispiele und bereits typische Formulierungen dieser Art. Erzeuge nach Moeglichkeit eine frische Formulierung.";
+                ESP_LOGI(TAG,"AI requested TalkCard action: %s variation=%u/%u",label,index+1,variation_count);
+            }else{
+                ESP_LOGI(TAG,"AI requested TalkCard action: %s",label);
+            }
+            return result;
         });
     }
     void InitializeTools(){
+        static const char* const AFFIRMATION_VARIATIONS[]={
+            "Ruhe und Gelassenheit","Selbstvertrauen","Mut","Akzeptanz","Neubeginn","eigene Staerken","kleine Schritte","Zuversicht"
+        };
+        static const char* const MINDFULNESS_VARIATIONS[]={
+            "Atmung","Koerperwahrnehmung","Geraeusche","visuelle Wahrnehmung","Beruehrung und Tastsinn","Umgebung bewusst wahrnehmen"
+        };
+        static const char* const WISDOM_VARIATIONS[]={
+            "Perspektive","Zeit und Gegenwart","Veraenderung","Beziehungen","Einfachheit","Entscheidungen","Geduld","Neugier"
+        };
+        static const char* const MOOD_VARIATIONS[]={
+            "aktuelle Grundstimmung","koerperlich spuerbare Stimmung","Gedanke der gerade Raum einnimmt","Energie und Antrieb","Beduerfnis im Moment","was heute innerlich nachwirkt"
+        };
+        static const char* const JOKE_VARIATIONS[]={
+            "Wortspiel oder Sprachwitz","trockener Humor","absurder Mini-Witz","Alltagsbeobachtung","Technik- oder Computerwitz","Tierwitz","Frage-Antwort-Witz","unerwartete Pointe","Buero- oder Arbeitsalltag","origineller Situationswitz"
+        };
+        static const char* const FUN_FACT_VARIATIONS[]={
+            "Natur","Technik","menschlicher Koerper","Weltraum","Geschichte","Sprache","Tiere","Physik"
+        };
+        static const char* const RIDDLE_VARIATIONS[]={
+            "Logikraetsel","Sprachraetsel","Gegenstandsraetsel","kleines Zahlenraetsel","Querdenk-Raetsel","Alltagsraetsel"
+        };
+        static const char* const FOCUS_VARIATIONS[]={
+            "eine klare Prioritaet setzen","mit einem Zwei-Minuten-Schritt beginnen","eine Ablenkung bewusst entfernen","nur den naechsten konkreten Schritt festlegen","eine offene Aufgabe abschliessen","Zeitfenster fuer konzentriertes Arbeiten setzen"
+        };
+        static const char* const HEALTH_VARIATIONS[]={
+            "etwas trinken","kurz aufstehen und bewegen","Schultern und Haltung lockern","Augen in die Ferne entspannen","bewusste kurze Pause","einmal tief durchatmen und Spannung loesen"
+        };
+        static const char* const EVENING_VARIATIONS[]={
+            "den Arbeitstag innerlich abschliessen","Unerledigtes fuer morgen loslassen","einen gelungenen Moment wahrnehmen","Tempo bewusst reduzieren","vom Tun ins Ausruhen wechseln","den Tag ohne Bewertung beenden"
+        };
+        static const char* const COMPLIMENT_VARIATIONS[]={
+            "Wertschaetzung fuer den Moment","Mut zum Innehalten","menschliche Neugier","Bereitschaft etwas auszuprobieren","Aufmerksamkeit fuer sich selbst","kleine Schritte ernst nehmen"
+        };
+        static const char* const SLEEP_VARIATIONS[]={
+            "ruhige Atmung","kurzer Body-Scan","Muskeln bewusst loslassen","Gedanken vorbeiziehen lassen","ruhige innere Vorstellung","Aufmerksamkeit auf Schwere und Ruhe lenken"
+        };
+        static const char* const ENCOURAGEMENT_VARIATIONS[]={
+            "Mut fuer den naechsten Schritt","Durchhalten ohne Druck","Neubeginn","kleine Fortschritte anerkennen","Perspektivwechsel","Vertrauen in den eigenen Handlungsspielraum"
+        };
+        static const char* const COMPANION_VARIATIONS[]={
+            "ruhige Praesenz","Raum zum Aussprechen geben","ohne Bewertung zuhoeren","den Moment gemeinsam strukturieren","eine kurze zugewandte Rueckmeldung","zum Weiterreden einladen ohne eine Frage zu stellen"
+        };
         auto& mcp_server=McpServer::GetInstance();
         mcp_server.AddTool(
             "self.hmbtec.talkcard.get_context",
@@ -58,22 +150,22 @@ private:
                 }
             }
         );
-        RegisterActionTool("self.hmbtec.talkcard.affirmation","HMBTC_AFFIRMATION","AFFIRMATION","Sprich jetzt genau eine kurze, glaubwuerdige und alltagstaugliche Affirmation auf Deutsch. Sie soll ruhig und persoenlich klingen, ohne Kitsch und ohne Rueckfrage. Maximal zwei kurze Saetze.");
-        RegisterActionTool("self.hmbtec.talkcard.wisdom","HMBTC_WISDOM","WISDOM","Gib jetzt eine kurze Weisheit oder einen kurzen Gedanken fuer den Tag auf Deutsch. Wenn du ein echtes Zitat mit Autor nennst, verwende nur eines, bei dem du dir der Zuordnung sicher bist; sonst formuliere einen eigenen Gedanken ohne falsche Zuschreibung. Keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.mindfulness","HMBTC_MINDFULNESS","MINDFULNESS","Gib jetzt einen sehr kurzen Achtsamkeits-Impuls auf Deutsch, der sofort in etwa 20 bis 40 Sekunden umsetzbar ist. Eine konkrete kleine Wahrnehmungs- oder Atemuebung, ruhig formuliert, keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.mood_check","HMBTC_MOOD_CHECK","MOOD_CHECK","Fuehre jetzt einen knappen Stimmungs-Check auf Deutsch durch. Stelle genau eine einfache, offene Frage dazu, wie es dem Nutzer gerade geht oder was gerade am staerksten spuerbar ist. Keine Diagnose und keine Interpretation vor der Antwort.");
-        RegisterActionTool("self.hmbtec.talkcard.joke","HMBTC_JOKE","JOKE","Erzaehle jetzt genau einen kurzen, harmlosen Witz oder ein Wortspiel auf Deutsch. Direkt zur Pointe, gut fuer Sprachausgabe, keine Erklaerung und keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.fun_fact","HMBTC_FUN_FACT","FUN_FACT","Nenne jetzt genau eine kurze, ueberraschende und moeglichst belastbare Tatsache auf Deutsch. Keine erfundene Behauptung, keine lange Erklaerung und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.affirmation","HMBTC_AFFIRMATION","AFFIRMATION","Sprich jetzt genau eine kurze, glaubwuerdige und alltagstaugliche Affirmation auf Deutsch. Sie soll ruhig und persoenlich klingen, ohne Kitsch und ohne Rueckfrage. Maximal zwei kurze Saetze.",1,1,AFFIRMATION_VARIATIONS,sizeof(AFFIRMATION_VARIATIONS)/sizeof(AFFIRMATION_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.wisdom","HMBTC_WISDOM","WISDOM","Gib jetzt eine kurze Weisheit oder einen kurzen Gedanken fuer den Tag auf Deutsch. Wenn du ein echtes Zitat mit Autor nennst, verwende nur eines, bei dem du dir der Zuordnung sicher bist; sonst formuliere einen eigenen Gedanken ohne falsche Zuschreibung. Keine Rueckfrage.",1,2,WISDOM_VARIATIONS,sizeof(WISDOM_VARIATIONS)/sizeof(WISDOM_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.mindfulness","HMBTC_MINDFULNESS","MINDFULNESS","Gib jetzt einen sehr kurzen Achtsamkeits-Impuls auf Deutsch, der sofort in etwa 20 bis 40 Sekunden umsetzbar ist. Eine konkrete kleine Wahrnehmungs- oder Atemuebung, ruhig formuliert, keine Rueckfrage.",1,3,MINDFULNESS_VARIATIONS,sizeof(MINDFULNESS_VARIATIONS)/sizeof(MINDFULNESS_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.mood_check","HMBTC_MOOD_CHECK","MOOD_CHECK","Fuehre jetzt einen knappen Stimmungs-Check auf Deutsch durch. Stelle genau eine einfache, offene Frage dazu, wie es dem Nutzer gerade geht oder was gerade am staerksten spuerbar ist. Keine Diagnose und keine Interpretation vor der Antwort.",1,4,MOOD_VARIATIONS,sizeof(MOOD_VARIATIONS)/sizeof(MOOD_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.joke","HMBTC_JOKE","JOKE","Erzaehle jetzt genau einen kurzen, harmlosen Witz auf Deutsch. Vermeide sehr bekannte Standardwitze und typische Klassiker. Direkt zur Pointe, gut fuer Sprachausgabe, keine Erklaerung und keine Rueckfrage.",2,1,JOKE_VARIATIONS,sizeof(JOKE_VARIATIONS)/sizeof(JOKE_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.fun_fact","HMBTC_FUN_FACT","FUN_FACT","Nenne jetzt genau eine kurze, ueberraschende und moeglichst belastbare Tatsache auf Deutsch. Keine erfundene Behauptung, keine lange Erklaerung und keine Rueckfrage.",2,2,FUN_FACT_VARIATIONS,sizeof(FUN_FACT_VARIATIONS)/sizeof(FUN_FACT_VARIATIONS[0]));
         RegisterActionTool("self.hmbtec.talkcard.news_compact","HMBTC_NEWS_COMPACT","NEWS_COMPACT","Gib dem Nutzer jetzt einen sehr kurzen Ueberblick ueber die wichtigsten aktuellen Nachrichten. Nutze dafuer verfuegbare aktuelle Nachrichten- oder Web-Werkzeuge, falls erforderlich. Nenne hoechstens drei relevante Meldungen. Formuliere auf Deutsch, sachlich, kompakt und gut fuer Sprachausgabe. Erfinde keine aktuellen Ereignisse. Wenn keine verlaesslichen aktuellen Nachrichten verfuegbar sind, sage das kurz und eindeutig. Stelle keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.riddle","HMBTC_RIDDLE","RIDDLE","Stelle jetzt genau ein kurzes, loesbares Raetsel auf Deutsch. Verrate die Loesung noch nicht und stelle ausser dem Raetsel keine weitere Frage.");
+        RegisterActionTool("self.hmbtec.talkcard.riddle","HMBTC_RIDDLE","RIDDLE","Stelle jetzt genau ein kurzes, loesbares Raetsel auf Deutsch. Verrate die Loesung noch nicht und stelle ausser dem Raetsel keine weitere Frage.",2,4,RIDDLE_VARIATIONS,sizeof(RIDDLE_VARIATIONS)/sizeof(RIDDLE_VARIATIONS[0]));
         RegisterActionTool("self.hmbtec.talkcard.morning_briefing","HMBTC_MORNING_BRIEFING","MORNING_BRIEFING","Gib jetzt ein sehr kurzes Morgen-Briefing auf Deutsch. Beziehe aktuelles Datum, Wochentag, Jahreszeit und - falls verlaesslich verfuegbar - Wetter oder relevante aktuelle Informationen ein. Nutze aktuelle Werkzeuge wenn noetig und erfinde nichts. Falls Kontext fehlt, liefere nur die sicher verfuegbaren Teile. Maximal etwa 30 Sekunden Sprachausgabe.");
-        RegisterActionTool("self.hmbtec.talkcard.focus","HMBTC_FOCUS","FOCUS","Gib jetzt eine kurze Fokus-Ansage auf Deutsch: ein klarer Satz zum Priorisieren und ein unmittelbar umsetzbarer erster Schritt. Keine Motivationsrede und keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.health_reminder","HMBTC_HEALTH_REMINDER","HEALTH_REMINDER","Gib jetzt einen kurzen, allgemeinen und risikoarmen Gesundheits-Reminder auf Deutsch, zum Beispiel trinken, kurz bewegen, Haltung lockern, Augen entspannen oder Pause machen. Keine Diagnose, keine Medikamenten- oder Therapieanweisung und keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.evening","HMBTC_EVENING","EVENING","Sprich jetzt einen kurzen Feierabend-Satz auf Deutsch, der beim mentalen Abschluss des Tages hilft. Ruhig, unaufdringlich, maximal zwei Saetze und keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.compliment","HMBTC_COMPLIMENT","COMPLIMENT","Gib jetzt ein kurzes, glaubwuerdiges und wertschätzendes Kompliment auf Deutsch. Erfinde keine persoenlichen Eigenschaften oder Leistungen, die du nicht kennst; beziehe dich stattdessen auf etwas allgemein Menschliches oder den Moment. Keine Rueckfrage.");
-        RegisterActionTool("self.hmbtec.talkcard.sleep","HMBTC_SLEEP","SLEEP","Gib jetzt eine sehr kurze Einschlaf-Hilfe auf Deutsch: ruhig, langsam formulierbar und mit einer einfachen Atem-, Koerper- oder Loslass-Anweisung. Keine medizinischen Versprechen und keine Rueckfrage. Maximal etwa 30 Sekunden.");
-        RegisterActionTool("self.hmbtec.talkcard.encouragement","HMBTC_ENCOURAGEMENT","ENCOURAGEMENT","Gib jetzt eine kurze persoenlich klingende Ermutigung auf Deutsch. Warm, konkret und glaubwuerdig, ohne unbegruendete Annahmen ueber die Situation des Nutzers und ohne Rueckfrage. Maximal zwei bis drei Saetze.");
-        RegisterActionTool("self.hmbtec.talkcard.companion","HMBTC_COMPANION","COMPANION","Reagiere jetzt mit einem kurzen, ruhigen Satz von Praesenz und Zugewandtheit auf Deutsch. Keine Behauptung menschlicher Gefuehle oder physischer Anwesenheit, keine Diagnose und keine Rueckfrage. Der Ton soll vermitteln: Du kannst hier gerade sprechen, und ich hoere dir zu.");
+        RegisterActionTool("self.hmbtec.talkcard.focus","HMBTC_FOCUS","FOCUS","Gib jetzt eine kurze Fokus-Ansage auf Deutsch: ein klarer Satz zum Priorisieren und ein unmittelbar umsetzbarer erster Schritt. Keine Motivationsrede und keine Rueckfrage.",3,2,FOCUS_VARIATIONS,sizeof(FOCUS_VARIATIONS)/sizeof(FOCUS_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.health_reminder","HMBTC_HEALTH_REMINDER","HEALTH_REMINDER","Gib jetzt einen kurzen, allgemeinen und risikoarmen Gesundheits-Reminder auf Deutsch. Keine Diagnose, keine Medikamenten- oder Therapieanweisung und keine Rueckfrage.",3,3,HEALTH_VARIATIONS,sizeof(HEALTH_VARIATIONS)/sizeof(HEALTH_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.evening","HMBTC_EVENING","EVENING","Sprich jetzt einen kurzen Feierabend-Satz auf Deutsch, der beim mentalen Abschluss des Tages hilft. Ruhig, unaufdringlich, maximal zwei Saetze und keine Rueckfrage.",3,4,EVENING_VARIATIONS,sizeof(EVENING_VARIATIONS)/sizeof(EVENING_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.compliment","HMBTC_COMPLIMENT","COMPLIMENT","Gib jetzt ein kurzes, glaubwuerdiges und wertschätzendes Kompliment auf Deutsch. Erfinde keine persoenlichen Eigenschaften oder Leistungen, die du nicht kennst; beziehe dich stattdessen auf etwas allgemein Menschliches oder den Moment. Keine Rueckfrage.",4,1,COMPLIMENT_VARIATIONS,sizeof(COMPLIMENT_VARIATIONS)/sizeof(COMPLIMENT_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.sleep","HMBTC_SLEEP","SLEEP","Gib jetzt eine sehr kurze Einschlaf-Hilfe auf Deutsch: ruhig, langsam formulierbar und mit einer einfachen Atem-, Koerper- oder Loslass-Anweisung. Keine medizinischen Versprechen und keine Rueckfrage. Maximal etwa 30 Sekunden.",4,2,SLEEP_VARIATIONS,sizeof(SLEEP_VARIATIONS)/sizeof(SLEEP_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.encouragement","HMBTC_ENCOURAGEMENT","ENCOURAGEMENT","Gib jetzt eine kurze persoenlich klingende Ermutigung auf Deutsch. Warm, konkret und glaubwuerdig, ohne unbegruendete Annahmen ueber die Situation des Nutzers und ohne Rueckfrage. Maximal zwei bis drei Saetze.",4,3,ENCOURAGEMENT_VARIATIONS,sizeof(ENCOURAGEMENT_VARIATIONS)/sizeof(ENCOURAGEMENT_VARIATIONS[0]));
+        RegisterActionTool("self.hmbtec.talkcard.companion","HMBTC_COMPANION","COMPANION","Reagiere jetzt mit einem kurzen, ruhigen Satz von Praesenz und Zugewandtheit auf Deutsch. Keine Behauptung menschlicher Gefuehle oder physischer Anwesenheit, keine Diagnose und keine Rueckfrage. Der Ton soll vermitteln: Du kannst hier gerade sprechen, und ich hoere dir zu.",4,4,COMPANION_VARIATIONS,sizeof(COMPANION_VARIATIONS)/sizeof(COMPANION_VARIATIONS[0]));
     }
 
     static void CategoryTimerCallback(void* arg){
@@ -226,7 +318,7 @@ public:
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
         button_4_(HMB_TC_BUTTON_4_GPIO){
-        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.1 - 16 actions + category PTT context");
+        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.2 - variation shuffle + category PTT context");
         InitializePixel();
         InitializeCategoryTimer();
         InitializeButtons();
