@@ -150,21 +150,20 @@ private:
         button_2_.OnClick([this](){ HandleCorner(2); });
         button_3_.OnClick([this](){ HandleCorner(3); });
         button_4_.OnClick([this](){ HandleCorner(4); });
-        ptt_button_.OnPressDown([this](){
-            if(ptt_active_){
-                return;
-            }
+
+        ptt_button_.OnLongPress([this](){
+            ESP_LOGI(TAG,"TalkCard long press -> PTT start: category=%u",category_);
             ptt_active_=true;
-            ESP_LOGI(TAG,"PTT down: category=%u",category_);
-            Application::GetInstance().StartListening();
+            auto& app=Application::GetInstance();
+            app.StartListening();
         });
+
         ptt_button_.OnPressUp([this](){
-            if(!ptt_active_){
-                return;
-            }
+            if(!ptt_active_) return;
+            ESP_LOGI(TAG,"TalkCard PTT released -> stop listening: category=%u",category_);
             ptt_active_=false;
-            ESP_LOGI(TAG,"PTT up: category=%u",category_);
-            Application::GetInstance().StopListening();
+            auto& app=Application::GetInstance();
+            app.StopListening();
             if(category_!=0){
                 RestartCategoryTimer();
             }
@@ -174,7 +173,7 @@ private:
 public:
     HmbtecTalkCardBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
-        ptt_button_(HMB_TC_PTT_GPIO),
+        ptt_button_(HMB_TC_PTT_GPIO,false,700),
         button_1_(HMB_TC_BUTTON_1_GPIO),
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
