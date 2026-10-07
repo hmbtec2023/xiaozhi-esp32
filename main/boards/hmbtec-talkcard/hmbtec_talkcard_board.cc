@@ -9,6 +9,8 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_random.h>
+#include <nvs.h>
+#include <nvs_flash.h>
 #include "mcp_server.h"
 
 #define TAG "HmbTalkCard"
@@ -35,6 +37,73 @@ private:
         uint8_t bag[MAX_VARIATIONS]={};
     };
     VariationState variation_state_[4][4];
+    nvs_handle_t variation_nvs_=0;
+    bool variation_nvs_ready_=false;
+    static constexpr uint8_t VARIATION_NVS_VERSION=1;
+
+    void VariationKey(uint8_t category,uint8_t topic,char* key,size_t key_size){
+        snprintf(key,key_size,"v%u%u",category,topic);
+    }
+    bool IsVariationStateValid(const VariationState& state){
+        if(state.count==0){
+            return true;
+        }
+        if(state.count>MAX_VARIATIONS || state.position>state.count){
+            return false;
+        }
+        bool seen[MAX_VARIATIONS]={};
+        for(uint8_t i=0;i<state.count;i++){
+            if(state.bag[i]>=state.count || seen[state.bag[i]]){
+                return false;
+            }
+            seen[state.bag[i]]=true;
+        }
+        return true;
+    }
+    void InitializeVariationNvs(){
+        esp_err_t err=nvs_open("hmb_tc_var",NVS_READWRITE,&variation_nvs_);
+        if(err!=ESP_OK){
+            ESP_LOGW(TAG,"Variation NVS open failed: %s",esp_err_to_name(err));
+            return;
+        }
+        variation_nvs_ready_=true;
+        uint8_t version=0;
+        err=nvs_get_u8(variation_nvs_,"version",&version);
+        if(err!=ESP_OK || version!=VARIATION_NVS_VERSION){
+            ESP_LOGI(TAG,"Variation NVS init/reset: old=%u new=%u",version,VARIATION_NVS_VERSION);
+            nvs_erase_all(variation_nvs_);
+            nvs_set_u8(variation_nvs_,"version",VARIATION_NVS_VERSION);
+            nvs_commit(variation_nvs_);
+            return;
+        }
+        for(uint8_t category=1;category<=4;category++){
+            for(uint8_t topic=1;topic<=4;topic++){
+                char key[4];
+                VariationKey(category,topic,key,sizeof(key));
+                size_t size=sizeof(VariationState);
+                VariationState loaded{};
+                if(nvs_get_blob(variation_nvs_,key,&loaded,&size)==ESP_OK && size==sizeof(VariationState) && IsVariationStateValid(loaded)){
+                    variation_state_[category-1][topic-1]=loaded;
+                    ESP_LOGI(TAG,"Variation NVS load %s: count=%u position=%u",key,loaded.count,loaded.position);
+                }
+            }
+        }
+    }
+    void SaveVariationState(uint8_t category,uint8_t topic){
+        if(!variation_nvs_ready_ || category<1 || category>4 || topic<1 || topic>4){
+            return;
+        }
+        char key[4];
+        VariationKey(category,topic,key,sizeof(key));
+        const VariationState& state=variation_state_[category-1][topic-1];
+        esp_err_t err=nvs_set_blob(variation_nvs_,key,&state,sizeof(state));
+        if(err==ESP_OK){
+            err=nvs_commit(variation_nvs_);
+        }
+        if(err!=ESP_OK){
+            ESP_LOGW(TAG,"Variation NVS save %s failed: %s",key,esp_err_to_name(err));
+        }
+    }
 
     void ShuffleVariations(VariationState& state,uint8_t count){
         state.count=count;
@@ -66,7 +135,9 @@ private:
                 state.bag[1]=temp;
             }
         }
-        return state.bag[state.position++];
+        const uint8_t result=state.bag[state.position++];
+        SaveVariationState(category,topic);
+        return result;
     }
     void RegisterActionTool(const char* tool_name,const char* trigger,const char* label,const char* prompt,uint8_t category=0,uint8_t topic=0,const char* const* variations=nullptr,uint8_t variation_count=0){
         auto& mcp_server=McpServer::GetInstance();
@@ -318,7 +389,8 @@ public:
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
         button_4_(HMB_TC_BUTTON_4_GPIO){
-        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.2 - variation shuffle + category PTT context");
+        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.3 - persistent variation shuffle + category PTT context");
+        InitializeVariationNvs();
         InitializePixel();
         InitializeCategoryTimer();
         InitializeButtons();
