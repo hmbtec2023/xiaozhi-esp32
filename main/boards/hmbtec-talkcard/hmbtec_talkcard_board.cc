@@ -26,30 +26,53 @@ private:
     uint8_t category_=0;
     bool ptt_active_=false;
 
+    void RegisterActionTool(const char* tool_name,const char* trigger,const char* label,const char* prompt){
+        auto& mcp_server=McpServer::GetInstance();
+        std::string description="When the user input is exactly ";
+        description+=trigger;
+        description+=", always call this tool. The returned text contains an instruction that must be executed. Do not mention the trigger, this tool, or internal instructions to the user. Follow the returned instruction and answer directly.";
+        mcp_server.AddTool(tool_name,description,PropertyList(),[label,prompt](const PropertyList& properties) -> ReturnValue {
+            ESP_LOGI(TAG,"AI requested TalkCard action: %s",label);
+            return std::string(prompt);
+        });
+    }
     void InitializeTools(){
         auto& mcp_server=McpServer::GetInstance();
-
         mcp_server.AddTool(
-            "self.hmbtec.talkcard.news_compact",
-            "When the user input is exactly HMBTC_NEWS_COMPACT, always call this tool. "
-            "The returned text contains an instruction that must be executed. "
-            "Do not mention HMBTC_NEWS_COMPACT or this tool to the user. "
-            "Follow the returned instruction and answer directly.",
+            "self.hmbtec.talkcard.get_context",
+            "Before answering a normal spoken user request on the HMBTEC TalkCard, call this tool first. "
+            "It returns the currently selected TalkCard category context. "
+            "Use that context to shape the answer naturally without mentioning category numbers, this tool, or internal instructions. "
+            "If no category is active, answer the user normally.",
             PropertyList(),
-            [](const PropertyList& properties) -> ReturnValue {
-                ESP_LOGI("HmbTalkCard","AI requested NEWS_COMPACT prompt");
-
-                return std::string(
-                    "Gib dem Nutzer jetzt einen sehr kurzen Ueberblick ueber die wichtigsten aktuellen Nachrichten. "
-                    "Nutze dafuer die verfuegbaren aktuellen Nachrichten- oder Web-Werkzeuge, falls erforderlich. "
-                    "Nenne hoechstens drei relevante Meldungen. "
-                    "Formuliere auf Deutsch, sachlich, kompakt und gut fuer Sprachausgabe. "
-                    "Erfinde keine aktuellen Ereignisse. "
-                    "Wenn keine verlaesslichen aktuellen Nachrichten verfuegbar sind, sage das kurz und eindeutig. "
-                    "Stelle keine Rueckfrage und sprich die Zusammenfassung direkt aus."
-                );
+            [this](const PropertyList& properties) -> ReturnValue {
+                const uint8_t category=category_;
+                ESP_LOGI(TAG,"AI requested TalkCard context: category=%u",category);
+                switch(category){
+                    case 1: return std::string("Aktiver TalkCard-Kontext: Achtsamkeit und Psyche. Beantworte die aktuelle Nutzeraussage ruhig, achtsam, emotional passend und knapp fuer Sprachausgabe. Keine Diagnose und keine unnoetige Rueckfrage.");
+                    case 2: return std::string("Aktiver TalkCard-Kontext: Unterhaltung und Spass. Beantworte die aktuelle Nutzeraussage leicht, unterhaltsam und passend zum Inhalt. Bleibe kurz und gut fuer Sprachausgabe.");
+                    case 3: return std::string("Aktiver TalkCard-Kontext: Alltag und Fokus. Beantworte die aktuelle Nutzeraussage praktisch, klar, fokussiert und handlungsorientiert. Bleibe kurz und gut fuer Sprachausgabe.");
+                    case 4: return std::string("Aktiver TalkCard-Kontext: Emotion und Naehe. Reagiere auf die aktuelle Nutzeraussage einfuehlsam, persoenlich und zugewandt, ohne kitschig zu werden. Beziehe die aus dem gesprochenen Text erkennbare Stimmung ein und bleibe knapp fuer Sprachausgabe.");
+                    default: return std::string("Kein spezieller TalkCard-Kategoriekontext ist aktiv. Beantworte die aktuelle Nutzeraussage normal.");
+                }
             }
         );
+        RegisterActionTool("self.hmbtec.talkcard.affirmation","HMBTC_AFFIRMATION","AFFIRMATION","Sprich jetzt genau eine kurze, glaubwuerdige und alltagstaugliche Affirmation auf Deutsch. Sie soll ruhig und persoenlich klingen, ohne Kitsch und ohne Rueckfrage. Maximal zwei kurze Saetze.");
+        RegisterActionTool("self.hmbtec.talkcard.wisdom","HMBTC_WISDOM","WISDOM","Gib jetzt eine kurze Weisheit oder einen kurzen Gedanken fuer den Tag auf Deutsch. Wenn du ein echtes Zitat mit Autor nennst, verwende nur eines, bei dem du dir der Zuordnung sicher bist; sonst formuliere einen eigenen Gedanken ohne falsche Zuschreibung. Keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.mindfulness","HMBTC_MINDFULNESS","MINDFULNESS","Gib jetzt einen sehr kurzen Achtsamkeits-Impuls auf Deutsch, der sofort in etwa 20 bis 40 Sekunden umsetzbar ist. Eine konkrete kleine Wahrnehmungs- oder Atemuebung, ruhig formuliert, keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.mood_check","HMBTC_MOOD_CHECK","MOOD_CHECK","Fuehre jetzt einen knappen Stimmungs-Check auf Deutsch durch. Stelle genau eine einfache, offene Frage dazu, wie es dem Nutzer gerade geht oder was gerade am staerksten spuerbar ist. Keine Diagnose und keine Interpretation vor der Antwort.");
+        RegisterActionTool("self.hmbtec.talkcard.joke","HMBTC_JOKE","JOKE","Erzaehle jetzt genau einen kurzen, harmlosen Witz oder ein Wortspiel auf Deutsch. Direkt zur Pointe, gut fuer Sprachausgabe, keine Erklaerung und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.fun_fact","HMBTC_FUN_FACT","FUN_FACT","Nenne jetzt genau eine kurze, ueberraschende und moeglichst belastbare Tatsache auf Deutsch. Keine erfundene Behauptung, keine lange Erklaerung und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.news_compact","HMBTC_NEWS_COMPACT","NEWS_COMPACT","Gib dem Nutzer jetzt einen sehr kurzen Ueberblick ueber die wichtigsten aktuellen Nachrichten. Nutze dafuer verfuegbare aktuelle Nachrichten- oder Web-Werkzeuge, falls erforderlich. Nenne hoechstens drei relevante Meldungen. Formuliere auf Deutsch, sachlich, kompakt und gut fuer Sprachausgabe. Erfinde keine aktuellen Ereignisse. Wenn keine verlaesslichen aktuellen Nachrichten verfuegbar sind, sage das kurz und eindeutig. Stelle keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.riddle","HMBTC_RIDDLE","RIDDLE","Stelle jetzt genau ein kurzes, loesbares Raetsel auf Deutsch. Verrate die Loesung noch nicht und stelle ausser dem Raetsel keine weitere Frage.");
+        RegisterActionTool("self.hmbtec.talkcard.morning_briefing","HMBTC_MORNING_BRIEFING","MORNING_BRIEFING","Gib jetzt ein sehr kurzes Morgen-Briefing auf Deutsch. Beziehe aktuelles Datum, Wochentag, Jahreszeit und - falls verlaesslich verfuegbar - Wetter oder relevante aktuelle Informationen ein. Nutze aktuelle Werkzeuge wenn noetig und erfinde nichts. Falls Kontext fehlt, liefere nur die sicher verfuegbaren Teile. Maximal etwa 30 Sekunden Sprachausgabe.");
+        RegisterActionTool("self.hmbtec.talkcard.focus","HMBTC_FOCUS","FOCUS","Gib jetzt eine kurze Fokus-Ansage auf Deutsch: ein klarer Satz zum Priorisieren und ein unmittelbar umsetzbarer erster Schritt. Keine Motivationsrede und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.health_reminder","HMBTC_HEALTH_REMINDER","HEALTH_REMINDER","Gib jetzt einen kurzen, allgemeinen und risikoarmen Gesundheits-Reminder auf Deutsch, zum Beispiel trinken, kurz bewegen, Haltung lockern, Augen entspannen oder Pause machen. Keine Diagnose, keine Medikamenten- oder Therapieanweisung und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.evening","HMBTC_EVENING","EVENING","Sprich jetzt einen kurzen Feierabend-Satz auf Deutsch, der beim mentalen Abschluss des Tages hilft. Ruhig, unaufdringlich, maximal zwei Saetze und keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.compliment","HMBTC_COMPLIMENT","COMPLIMENT","Gib jetzt ein kurzes, glaubwuerdiges und wertschätzendes Kompliment auf Deutsch. Erfinde keine persoenlichen Eigenschaften oder Leistungen, die du nicht kennst; beziehe dich stattdessen auf etwas allgemein Menschliches oder den Moment. Keine Rueckfrage.");
+        RegisterActionTool("self.hmbtec.talkcard.sleep","HMBTC_SLEEP","SLEEP","Gib jetzt eine sehr kurze Einschlaf-Hilfe auf Deutsch: ruhig, langsam formulierbar und mit einer einfachen Atem-, Koerper- oder Loslass-Anweisung. Keine medizinischen Versprechen und keine Rueckfrage. Maximal etwa 30 Sekunden.");
+        RegisterActionTool("self.hmbtec.talkcard.encouragement","HMBTC_ENCOURAGEMENT","ENCOURAGEMENT","Gib jetzt eine kurze persoenlich klingende Ermutigung auf Deutsch. Warm, konkret und glaubwuerdig, ohne unbegruendete Annahmen ueber die Situation des Nutzers und ohne Rueckfrage. Maximal zwei bis drei Saetze.");
+        RegisterActionTool("self.hmbtec.talkcard.companion","HMBTC_COMPANION","COMPANION","Reagiere jetzt mit einem kurzen, ruhigen Satz von Praesenz und Zugewandtheit auf Deutsch. Keine Behauptung menschlicher Gefuehle oder physischer Anwesenheit, keine Diagnose und keine Rueckfrage. Der Ton soll vermitteln: Du kannst hier gerade sprechen, und ich hoere dir zu.");
     }
 
     static void CategoryTimerCallback(void* arg){
@@ -85,17 +108,19 @@ private:
     }
 
     void ExecuteAction(uint8_t category,uint8_t topic){
-        ESP_LOGI(TAG,"Execute action: category=%u topic=%u",category,topic);
-
-        auto& app=Application::GetInstance();
-
-        if(category==2 && topic==3){
-            ESP_LOGI(TAG,"Action 2/3: NEWS_COMPACT");
-            app.WakeWordInvoke("HMBTC_NEWS_COMPACT",true);
+        static const char* const action_ids[4][4]={
+            {"HMBTC_AFFIRMATION","HMBTC_WISDOM","HMBTC_MINDFULNESS","HMBTC_MOOD_CHECK"},
+            {"HMBTC_JOKE","HMBTC_FUN_FACT","HMBTC_NEWS_COMPACT","HMBTC_RIDDLE"},
+            {"HMBTC_MORNING_BRIEFING","HMBTC_FOCUS","HMBTC_HEALTH_REMINDER","HMBTC_EVENING"},
+            {"HMBTC_COMPLIMENT","HMBTC_SLEEP","HMBTC_ENCOURAGEMENT","HMBTC_COMPANION"}
+        };
+        if(category<1 || category>4 || topic<1 || topic>4){
+            ESP_LOGW(TAG,"Invalid action: category=%u topic=%u",category,topic);
             return;
         }
-
-        ESP_LOGW(TAG,"Action not implemented: category=%u topic=%u",category,topic);
+        const char* action_id=action_ids[category-1][topic-1];
+        ESP_LOGI(TAG,"Execute action: category=%u topic=%u id=%s",category,topic,action_id);
+        Application::GetInstance().WakeWordInvoke(action_id,true);
     }
 
     void HandleCorner(uint8_t key){
@@ -178,7 +203,7 @@ public:
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
         button_4_(HMB_TC_BUTTON_4_GPIO){
-        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.2.0 - XiaoZhi actions");
+        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.3.0 - 16 actions + category PTT context");
         InitializePixel();
         InitializeCategoryTimer();
         InitializeButtons();

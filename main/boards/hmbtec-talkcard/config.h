@@ -11,6 +11,7 @@
     #define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
     #define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
     #define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
+    // I2S microphone L/R channel-select pin must be hard-wired to GND.
     #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7
     #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_15
     #define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_16
@@ -20,7 +21,7 @@
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 
 // ============================================================================
-// HMB | TEC TalkCard V0.1.0
+// HMB | TEC TalkCard V0.3.0
 // ============================================================================
 #define HMB_TC_PTT_GPIO      GPIO_NUM_44
 #define HMB_TC_PIXEL_GPIO    GPIO_NUM_43
