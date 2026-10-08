@@ -1328,6 +1328,16 @@ void Application::ToggleChatState() {
     );
 }
 
+// Explicitly terminate an interactive NFC conversation from any device state.
+void Application::EndConversation() {
+    Schedule([this]() {
+        auto state=GetDeviceState();
+        if(state==kDeviceStateSpeaking)AbortSpeaking(kAbortReasonNone);
+        if(protocol_ && protocol_->IsAudioChannelOpened())protocol_->CloseAudioChannel();
+        SetDeviceState(kDeviceStateIdle);
+    });
+}
+
 void Application::StartListening() {
     xEventGroupSetBits(
         event_group_,

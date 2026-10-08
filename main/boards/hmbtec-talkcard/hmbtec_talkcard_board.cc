@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_random.h>
+#include <atomic>
 #include <nvs.h>
 #include <nvs_flash.h>
 #include "mcp_server.h"
@@ -28,6 +29,7 @@ private:
     bool nfc_ready_=false;
     std::string nfc_context_;
     std::string nfc_uid_;
+    std::atomic<bool> nfc_talk_active_{false};
     static void NfcTask(void* arg){static_cast<HmbtecTalkCardBoard*>(arg)->NfcLoop();}
     static std::string NfcAscii(const uint8_t* data,size_t len){
         std::string text;
@@ -151,6 +153,7 @@ private:
     void DispatchNfcCommand(const NfcCommand& c){
         ESP_LOGI(TAG,"NFC COMMAND cmd=%s para0=%s para1=%s para2=%s",c.cmd.c_str(),c.para0.c_str(),c.para1.c_str(),c.para2.c_str());
         if(c.cmd=="affirmation"){
+            nfc_talk_active_.store(false);
             nfc_context_="NFC affirmation profile: "+c.para0;
             ExecuteAction(1,1);
         }else if(c.cmd=="talk"){
@@ -159,8 +162,10 @@ private:
             if(!c.para1.empty())nfc_context_+=". Zielgruppe/Kontext: "+c.para1;
             if(!c.para2.empty())nfc_context_+=". Weitere Angabe: "+c.para2;
             ESP_LOGI(TAG,"NFC talk via button-style trigger, context=%s",nfc_context_.c_str());
+            nfc_talk_active_.store(true);
             Application::GetInstance().WakeWordInvoke("HMBTC_NFC_TALK",false);
         }else if(c.cmd=="prompt"){
+            nfc_talk_active_.store(false);
             if(c.para0.empty()){ESP_LOGW(TAG,"NFC prompt: missing para0");return;}
             nfc_context_="NFC-PROMPT: "+c.para0;
             if(!c.para1.empty())nfc_context_+=". Kontext: "+c.para1;
@@ -522,6 +527,18 @@ private:
     }
 
     void HandleCorner(uint8_t key){
+#ifdef NFC_EN
+        if(nfc_talk_active_.exchange(false)){
+            ESP_LOGI(TAG,"K%u -> terminate NFC talk session",key);
+            nfc_context_.clear();
+            if(category_timer_!=nullptr)esp_timer_stop(category_timer_);
+            category_=0;
+            topic_selection_pending_=false;
+            SetPixel(0);
+            Application::GetInstance().EndConversation();
+            return;
+        }
+#endif
         if(!topic_selection_pending_){
             category_=key;
             topic_selection_pending_=true;
@@ -618,7 +635,7 @@ public:
         button_2_(HMB_TC_BUTTON_2_GPIO),
         button_3_(HMB_TC_BUTTON_3_GPIO),
         button_4_(HMB_TC_BUTTON_4_GPIO){
-        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.4.6 - NFC button-style triggers");
+        ESP_LOGI(TAG,"HMB | TEC TalkCard V0.4.7 - NFC talk corner exit");
         InitializeVariationNvs();
         InitializePixel();
         InitializeCategoryTimer();
