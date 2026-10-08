@@ -32,4 +32,15 @@
 #define HMB_TC_BUTTON_4_GPIO GPIO_NUM_14
 #define HMB_TC_TIMEOUT_MS    30000
 
+// Optional RC522 (SPI2). GPIO33..37 only if NOT reserved for Octal memory.
+#define NFC_EN
+#ifdef NFC_EN
+#include <driver/spi_master.h>
+#define NFC_SPI_HOST SPI2_HOST
+#define NFC_SS_GPIO GPIO_NUM_33
+#define NFC_SCK_GPIO GPIO_NUM_34
+#define NFC_MOSI_GPIO GPIO_NUM_35
+#define NFC_MISO_GPIO GPIO_NUM_36
+#define NFC_RST_GPIO GPIO_NUM_37
+#endif
 #endif // _BOARD_CONFIG_H_
