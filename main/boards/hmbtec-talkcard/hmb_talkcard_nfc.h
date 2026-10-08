@@ -109,11 +109,13 @@ public:
     // Classic sector 1 contains only three data blocks (4,5,6); block 7 is a trailer.
     bool read_payload(uint8_t* out,size_t capacity,size_t& out_len){
         out_len=0;
-        if(!out || capacity<64)return false;
+        if(!out || capacity<48)return false;
         memset(out,0,capacity);
         if(ntag_){
-            for(uint8_t page=4;page<=16;page+=4){
-                uint8_t tx[4]={0x30,page,0,0};
+            // Read four pages per transaction. Stop at complete NDEF TLV, not a fixed 64-byte limit.
+            size_t required=0;
+            for(unsigned page=4;out_len+16<=capacity && page<=252;page+=4){
+                uint8_t tx[4]={0x30,uint8_t(page),0,0};
                 uint16_t c=crc_a(tx,2);tx[2]=uint8_t(c);tx[3]=uint8_t(c>>8);
                 uint8_t rx[20]={};size_t n=sizeof(rx);
                 if(!transceive(tx,4,rx,n) || n!=18){
@@ -121,8 +123,30 @@ public:
                     return false;
                 }
                 memcpy(out+out_len,rx,16);out_len+=16;
+                // TLV can be preceded by NULL TLVs; supports short and extended lengths.
+                size_t pos=0;
+                while(pos<out_len){
+                    uint8_t type=out[pos++];
+                    if(type==0x00)continue;
+                    if(type==0xFE){required=pos;break;}
+                    if(pos>=out_len)break;
+                    size_t length=out[pos++];
+                    if(length==0xFF){
+                        if(pos+2>out_len)break;
+                        length=(size_t(out[pos])<<8)|out[pos+1];pos+=2;
+                    }
+                    if(length>capacity || pos+length>capacity){
+                        ESP_LOGW("TalkCardNFC","Type2 TLV exceeds buffer (%u)",(unsigned)length);
+                        return false;
+                    }
+                    if(type==0x03){required=pos+length;break;}
+                    if(pos+length>out_len)break;
+                    pos+=length;
+                }
+                if(required && out_len>=required)return true;
             }
-            return true;
+            ESP_LOGW("TalkCardNFC","Type2 TLV incomplete or exceeds %u bytes",(unsigned)capacity);
+            return false;
         }
         if(sak_!=0x08 && sak_!=0x18)return false;
         for(uint8_t block=4;block<=6;block++){
