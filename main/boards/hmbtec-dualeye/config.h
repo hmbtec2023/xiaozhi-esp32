@@ -36,6 +36,14 @@
 // 1 = DualEye enabled
 #define HMB_DUALEYE_ENABLED 1
 
+// 0 = Augen, 1 = zwei synchron spiegelbildliche Flammen
+#define HMB_DISPLAY_MODE 1
+#define HMB_FLAME_BACK_MIRROR 1
+#define HMB_FLAME_AURA_EN 1
+#define HMB_FLAME_AURA_STRENGTH 75
+#define HMB_FLAME_AURA_RADIUS 40
+#define HMB_FLAME_SCALE_PERCENT 125
+
 // Displaytypen
 #define HMB_EYE_GC9D01_160 1
 #define HMB_EYE_GC9A01_240 2

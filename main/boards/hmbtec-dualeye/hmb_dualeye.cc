@@ -371,7 +371,7 @@ static void render(bool leftEye,HmbEyeExpression expression){
 // ============================================================================
 // Frame an Display übertragen
 // ============================================================================
-static void push(spi_device_handle_t d){
+static void push(spi_device_handle_t d,bool mirror=false){
     uint16_t xEnd=W-1;
     uint16_t yEnd=H-1;
     const uint8_t col[]={0x00,0x00,(uint8_t)(xEnd>>8),(uint8_t)(xEnd&0xFF)};
@@ -383,7 +383,7 @@ static void push(spi_device_handle_t d){
     static uint8_t line[W*2];
     for(int y=0;y<H;y++){
         for(int x=0;x<W;x++){
-            uint16_t c=fb[y*W+x];
+            uint16_t c=fb[y*W+(mirror?(W-1-x):x)];
             line[x*2]=(uint8_t)(c>>8);
             line[x*2+1]=(uint8_t)(c&0xFF);
         }
@@ -443,11 +443,88 @@ static void applyLookTarget(HmbEyeLook look){
 // ============================================================================
 // Eye Animation Task
 // ============================================================================
+// HMB FlameEngine: prozedurale Flamme, ein Framebuffer, zwei gespiegelte Ausgaben.
+// Keine Frame-Assets im Flash; keine zweite Bildkopie im RAM.
+#if HMB_DISPLAY_MODE == 1
+static void renderFlame(float t,DeviceState state){
+    const float activity=(state==kDeviceStateSpeaking)?1.3f:((state==kDeviceStateListening)?0.5f:1.0f);
+    const float sway=(sinf(t*1.9f)*5.0f+sinf(t*3.17f+0.7f)*2.3f)*activity;
+    const float flicker=0.96f+0.035f*sinf(t*7.1f)+0.02f*sinf(t*12.3f);
+    const float scale=HMB_FLAME_SCALE_PERCENT/100.0f;
+    const float baseY=211.0f;
+    const float height=151.0f*scale*flicker;
+    const float auraStrength=HMB_FLAME_AURA_STRENGTH/100.0f;
+    const float auraRadius=(float)HMB_FLAME_AURA_RADIUS;
+    for(int y=0;y<H;y++){
+        float u=(baseY-y)/height;
+        for(int x=0;x<W;x++){
+            float r=0.0f,g=0.0f,b=0.0f;
+            if(u>-0.25f && u<1.23f){
+                float uc=fmaxf(0.0f,fminf(1.0f,u));
+                float bend=sway*uc*uc+2.2f*sinf(t*3.7f+uc*5.0f)*uc*uc;
+                float cx=W*0.5f+bend;
+                // Flamme: schmaler, runder Fuß; breiter Bauch; feine bewegliche Spitze.
+                float width=(3.0f+33.0f*powf(fmaxf(0.0f,1.0f-uc),0.72f)*sinf(3.14159265f*powf(uc,0.64f)))*scale;
+                width*=1.0f+0.07f*sinf(t*4.9f+uc*8.0f);
+                float dx=fabsf((float)x-cx);
+                float cap=fminf(1.0f,fmaxf(0.0f,(baseY-y)/9.0f));
+                cap*=fminf(1.0f,fmaxf(0.0f,(baseY-height*0.99f-y)/(-height*0.01f)));
+                float inside=(width-dx)/3.0f;
+                float alpha=fmaxf(0.0f,fminf(1.0f,inside))*cap;
+#if HMB_FLAME_AURA_EN
+                // Konturfolgende, weich auslaufende Aura; keine zusätzliche Bilddatei.
+                float dist=fmaxf(0.0f,dx-width);
+                float vertical=(u<0.0f)?(-u*height):((u>1.0f)?((u-1.0f)*height):0.0f);
+                float d=sqrtf(dist*dist+vertical*vertical);
+                float glow=expf(-d*d/(2.0f*auraRadius*auraRadius))*auraStrength;
+                glow*=0.72f+0.28f*sinf(3.14159265f*uc);
+                r+=35.0f*glow; g+=11.0f*glow; b+=1.5f*glow;
+#endif
+                if(alpha>0.0f){
+                    float core=fmaxf(0.0f,1.0f-dx/(width*0.66f+0.1f));
+                    float blue=fmaxf(0.0f,1.0f-uc/0.105f);
+                    float red=255.0f;
+                    float green=100.0f+150.0f*core+22.0f*uc;
+                    float blu=5.0f+85.0f*core;
+                    red=red*(1.0f-blue)+45.0f*blue;
+                    green=green*(1.0f-blue)+115.0f*blue;
+                    blu=blu*(1.0f-blue)+210.0f*blue;
+                    r=r*(1.0f-alpha)+red*alpha;
+                    g=g*(1.0f-alpha)+green*alpha;
+                    b=b*(1.0f-alpha)+blu*alpha;
+                }
+            }
+            // Angedeuteter, leicht gebogener Docht, sichtbar im unteren Flammenbereich.
+            float wickY=baseY-5.0f;
+            float wickX=W*0.5f+1.3f*sinf((wickY-y)*0.16f);
+            if(y>=baseY-18.0f && y<=baseY+2.0f && fabsf(x-wickX)<1.65f){
+                r=17.0f;g=15.0f;b=13.0f;
+            }
+            float emberX=W*0.5f+1.3f*sinf(13.0f*0.16f);
+            float ex=x-emberX,ey=y-(baseY-15.0f);
+            float ember=expf(-(ex*ex+ey*ey)/8.0f);
+            r=fmaxf(r,240.0f*ember);g=fmaxf(g,70.0f*ember);b=fmaxf(b,7.0f*ember);
+            uint8_t R=(uint8_t)fminf(255.0f,fmaxf(0.0f,r));
+            uint8_t G=(uint8_t)fminf(255.0f,fmaxf(0.0f,g));
+            uint8_t B=(uint8_t)fminf(255.0f,fmaxf(0.0f,b));
+            fb[y*W+x]=((R&0xF8)<<8)|((G&0xFC)<<3)|(B>>3);
+        }
+    }
+}
+#endif
+
 static void task(void*){
     nextLook=esp_timer_get_time()/1000+800;
     nextBlink=esp_timer_get_time()/1000+3000;
 
     while(true){
+#if HMB_DISPLAY_MODE == 1
+        renderFlame((float)esp_timer_get_time()/1000000.0f,eyeState);
+        push(devL,false);
+        push(devR,HMB_FLAME_BACK_MIRROR!=0);
+        vTaskDelay(pdMS_TO_TICKS(45));
+        continue;
+#endif
         int64_t now=esp_timer_get_time()/1000;
         DeviceState s=eyeState;
         HmbEyeExpression expression=eyeExpression;
@@ -594,7 +671,7 @@ static void task(void*){
 // HmbDualEye
 // ============================================================================
 void HmbDualEye::Init(){
-    ESP_LOGI(TAG,"Initializing HMBTEC DualEye");
+    ESP_LOGI(TAG,"Initializing HMBTEC DualEye / FlameEngine mode=%d",HMB_DISPLAY_MODE);
 #if HMB_EYE_DISPLAY == HMB_EYE_GC9D01_160
     ESP_LOGI(TAG,"Display: GC9D01 160x160");
 #elif HMB_EYE_DISPLAY == HMB_EYE_GC9A01_240
@@ -603,6 +680,7 @@ void HmbDualEye::Init(){
     ESP_LOGI(TAG,"Framebuffer: %dx%d = %u bytes",W,H,(unsigned)(N*sizeof(uint16_t)));
 
     fb=(uint16_t*)heap_caps_malloc(N*sizeof(uint16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!fb) fb=(uint16_t*)heap_caps_malloc(N*sizeof(uint16_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     if(!fb){
         ESP_LOGE(TAG,"Could not allocate DualEye framebuffer: %u bytes",(unsigned)(N*sizeof(uint16_t)));
         return;
