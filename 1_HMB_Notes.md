@@ -7,6 +7,48 @@ source /Users/hmb/.espressif/tools/activate_idf_v6.1.sh
 grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 
 ============================================================
+ DualEye
+============================================================
+
+## 16 MB – Octal PSRAM (XH-S3E-AI_V1.0)
+# ------------------------------------------
+### Build
+python3 scripts/build.py hmbtec-dualeye --name hmbtec-dualeye --language de-DE
+
+### Konfiguration prüfen
+grep -E "CONFIG_ESPTOOLPY_FLASHSIZE_|CONFIG_SPIRAM_MODE_(QUAD|OCT)" sdkconfig
+
+Erwartet:
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+### Flashen 16MB
+pkill -f idf_monitor.py
+ls /dev/cu.usbmodem*
+
+python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 16MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x20000 build/xiaozhi.bin 0x800000 build/generated_assets.bin
+
+
+## 4 MB – Quad PSRAM (ESP32S3 SuperMini)
+# ------------------------------------------
+### Build
+python3 scripts/build.py hmbtec-dualeye --name hmbtec-dualeye-4mb --language de-DE
+
+### Konfiguration prüfen
+grep -E "CONFIG_ESPTOOLPY_FLASHSIZE_|CONFIG_SPIRAM_MODE_(QUAD|OCT)" sdkconfig
+
+Erwartet:
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+### Flashen 4MB
+pkill -f idf_monitor.py
+ls /dev/cu.usbmodem*
+
+python -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin
+
+
+============================================================
  LICHTBLICK BREAD
 ============================================================
 

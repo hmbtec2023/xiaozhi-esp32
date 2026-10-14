@@ -44,11 +44,10 @@
 // Aktive Displayvariante
 // ---------------------------------------------------------------------------
 
-// Kleine Augen:
+//--- Kleine Augen:
+//#define HMB_EYE_DISPLAY HMB_EYE_GC9D01_160
+//--- Große Augen:
 #define HMB_EYE_DISPLAY HMB_EYE_GC9A01_240
-
-// Große Augen:
-//#define HMB_EYE_DISPLAY HMB_EYE_GC9A01_240
 
 #if HMB_EYE_DISPLAY == HMB_EYE_GC9D01_160
     #define HMB_EYE_WIDTH 160
