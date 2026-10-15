@@ -446,7 +446,117 @@ static void applyLookTarget(HmbEyeLook look){
 // HMB FlameEngine: prozedurale Flamme, ein Framebuffer, zwei gespiegelte Ausgaben.
 // Keine Frame-Assets im Flash; keine zweite Bildkopie im RAM.
 #if HMB_DISPLAY_MODE == 1
+// Steuerung wird unter einem kurzen Spinlock kopiert; Rendering bleibt lockfrei.
+static portMUX_TYPE moodMux=portMUX_INITIALIZER_UNLOCKED;
+static uint32_t moodColor=HMB_FLAME_MOOD_DEFAULT_COLOR;
+static uint8_t moodIntensity=HMB_FLAME_MOOD_DEFAULT_INTENSITY;
+static uint32_t moodTransitionMs=HMB_FLAME_MOOD_TRANSITION_MS;
+static float moodCurrentR=0.0f,moodCurrentG=0.0f,moodCurrentB=0.0f;
+static float moodCurrentIntensity=0.0f;
+static int64_t moodLastFrameUs=0;
+void HmbFlameSetMoodColor(uint32_t rgb){
+    portENTER_CRITICAL(&moodMux);
+    moodColor=rgb&0xFFFFFFu;
+    portEXIT_CRITICAL(&moodMux);
+}
+void HmbFlameSetMoodIntensity(uint8_t intensity){
+    portENTER_CRITICAL(&moodMux);
+    moodIntensity=std::min<uint8_t>(intensity,100);
+    portEXIT_CRITICAL(&moodMux);
+}
+void HmbFlameSetMoodTransition(uint32_t milliseconds){
+    portENTER_CRITICAL(&moodMux);
+    moodTransitionMs=milliseconds;
+    portEXIT_CRITICAL(&moodMux);
+}
+static void updateMood(int64_t nowUs){
+    uint32_t color,transition;
+    uint8_t intensity;
+    portENTER_CRITICAL(&moodMux);
+    color=moodColor; intensity=moodIntensity; transition=moodTransitionMs;
+    portEXIT_CRITICAL(&moodMux);
+    float deltaMs=(moodLastFrameUs>0)?fminf(250.0f,(nowUs-moodLastFrameUs)/1000.0f):0.0f;
+    moodLastFrameUs=nowUs;
+    float step=(transition==0)?1.0f:fminf(1.0f,deltaMs/(float)transition);
+    // Exponentielles, sanftes Einblenden ohne sichtbare Farbspruenge.
+    moodCurrentR+=(((color>>16)&255)-moodCurrentR)*step;
+    moodCurrentG+=(((color>>8)&255)-moodCurrentG)*step;
+    moodCurrentB+=((color&255)-moodCurrentB)*step;
+    moodCurrentIntensity+=((float)intensity-moodCurrentIntensity)*step;
+}
+#else
+void HmbFlameSetMoodColor(uint32_t){}
+void HmbFlameSetMoodIntensity(uint8_t){}
+void HmbFlameSetMoodTransition(uint32_t){}
+#endif
+
+#if HMB_DISPLAY_MODE == 1
+#if HMB_FLAME_SPARKLE_EN
+struct HmbSparkle{
+    float x=0.0f,y=0.0f;
+    int64_t startUs=0;
+    uint32_t durationMs=0;
+    bool star=false;
+    bool active=false;
+};
+static HmbSparkle sparkles[HMB_FLAME_SPARKLE_MAX_ACTIVE];
+static int64_t sparkleNextUs=0;
+static uint32_t sparkleEvents=0;
+static uint32_t sparkleRandomRange(uint32_t lo,uint32_t hi){
+    return lo+(esp_random()%(hi-lo+1));
+}
+static void updateSparkles(int64_t nowUs){
+    for(auto &s:sparkles){
+        if(s.active && nowUs-s.startUs>=(int64_t)s.durationMs*1000) s.active=false;
+    }
+    if(sparkleNextUs==0) sparkleNextUs=nowUs+(int64_t)(HMB_FLAME_SPARKLE_TEST_MODE?1000:sparkleRandomRange(HMB_FLAME_SPARKLE_MIN_MS,HMB_FLAME_SPARKLE_MAX_MS))*1000;
+    if(nowUs<sparkleNextUs) return;
+    int count=HMB_FLAME_SPARKLE_TEST_MODE?1:((sparkleRandomRange(0,99)<15)?2:1);
+    const int firstSide=(sparkleEvents++ & 1U);
+    if(count>HMB_FLAME_SPARKLE_MAX_ACTIVE) count=HMB_FLAME_SPARKLE_MAX_ACTIVE;
+    for(int i=0;i<count;i++){
+        HmbSparkle &s=sparkles[i];
+        const bool left=((i+firstSide)&1)==0;
+        s.x=(float)(left?sparkleRandomRange(65,86):sparkleRandomRange(154,175));
+        s.y=(float)sparkleRandomRange(53,83);
+        s.startUs=nowUs+(i==1?300000:0);
+        s.durationMs=HMB_FLAME_SPARKLE_TEST_MODE?3500:sparkleRandomRange(1400,2000);
+        s.star=sparkleRandomRange(0,99)<HMB_FLAME_SPARKLE_STAR_CHANCE;
+        s.active=true;
+    }
+    sparkleNextUs=nowUs+(int64_t)(HMB_FLAME_SPARKLE_TEST_MODE?5000:sparkleRandomRange(HMB_FLAME_SPARKLE_MIN_MS,HMB_FLAME_SPARKLE_MAX_MS))*1000;
+    ESP_LOGI(TAG,"MagicSparkle event=%lu count=%d first=(%.0f,%.0f) duration=%lu ms",(unsigned long)sparkleEvents,count,sparkles[0].x,sparkles[0].y,(unsigned long)sparkles[0].durationMs);
+}
+static float sparkleAt(int x,int y,int64_t nowUs){
+    float light=0.0f;
+    for(const auto &s:sparkles){
+        if(!s.active || nowUs<s.startUs) continue;
+        float progress=(float)(nowUs-s.startUs)/((float)s.durationMs*1000.0f);
+        if(progress<0.0f || progress>=1.0f) continue;
+        float fade=(progress<0.28f)?(progress/0.28f):((1.0f-progress)/0.72f);
+        float dx=fabsf(x-s.x),dy=fabsf(y-s.y);
+
+    if(dx>22.0f || dy>22.0f) continue;
+    float d2=dx*dx+dy*dy;
+    float core=expf(-d2/28.0f);
+    float rays=0.0f;
+    if(s.star){
+        rays=fmaxf(
+            expf(-dy*dy/3.0f)*expf(-dx*dx/110.0f),
+            expf(-dx*dx/3.0f)*expf(-dy*dy/110.0f)
+        )*0.95f;
+    }        
+        light=fmaxf(light,fminf(1.0f,(core+rays)*fade));
+    }
+    return light*(HMB_FLAME_SPARKLE_INTENSITY/100.0f);
+}
+#endif
 static void renderFlame(float t,DeviceState state){
+    const int64_t frameUs=esp_timer_get_time();
+    updateMood(frameUs);
+#if HMB_FLAME_SPARKLE_EN
+    updateSparkles(frameUs);
+#endif
     const float activity=(state==kDeviceStateSpeaking)?1.3f:((state==kDeviceStateListening)?0.5f:1.0f);
     const float sway=(sinf(t*1.9f)*5.0f+sinf(t*3.17f+0.7f)*2.3f)*activity;
     const float flicker=0.96f+0.035f*sinf(t*7.1f)+0.02f*sinf(t*12.3f);
@@ -459,6 +569,20 @@ static void renderFlame(float t,DeviceState state){
         float u=(baseY-y)/height;
         for(int x=0;x<W;x++){
             float r=0.0f,g=0.0f,b=0.0f;
+#if HMB_FLAME_MOOD_EN
+            // Zwei diffuse, seitliche Farbfelder. Nicht im Zentrum der Flamme.
+            // Maximalintensitaet bewusst gering: Mood bleibt Hintergrundlicht.
+            const float nx=((float)x-W*0.5f)/(float)W;
+            const float ny=((float)y-H*0.56f)/(float)H;
+            const float ax=(fabsf(nx)-0.33f)/0.19f;
+            const float ay=ny/0.33f;
+            const float moodFalloff=expf(-2.0f*(ax*ax+ay*ay));
+            const float centerMask=fminf(1.0f,fmaxf(0.0f,(fabsf(nx)-0.11f)/0.13f));
+            const float moodLevel=(moodCurrentIntensity/100.0f)*moodFalloff*centerMask*0.62f;
+            r+=moodCurrentR*moodLevel;
+            g+=moodCurrentG*moodLevel;
+            b+=moodCurrentB*moodLevel;
+#endif
             if(u>-0.25f && u<1.23f){
                 float uc=fmaxf(0.0f,fminf(1.0f,u));
                 float bend=sway*uc*uc+2.2f*sinf(t*3.7f+uc*5.0f)*uc*uc;
@@ -504,6 +628,11 @@ static void renderFlame(float t,DeviceState state){
             float ex=x-emberX,ey=y-(baseY-15.0f);
             float ember=expf(-(ex*ex+ey*ey)/8.0f);
             r=fmaxf(r,240.0f*ember);g=fmaxf(g,70.0f*ember);b=fmaxf(b,7.0f*ember);
+#if HMB_FLAME_SPARKLE_EN
+            // Grosser Stern mit weichen Strahlen; im Testmodus einzeln links/rechts.
+            float sparkle=sparkleAt(x,y,frameUs);
+            r+=255.0f*sparkle;g+=235.0f*sparkle;b+=180.0f*sparkle;
+#endif
             uint8_t R=(uint8_t)fminf(255.0f,fmaxf(0.0f,r));
             uint8_t G=(uint8_t)fminf(255.0f,fmaxf(0.0f,g));
             uint8_t B=(uint8_t)fminf(255.0f,fmaxf(0.0f,b));

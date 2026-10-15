@@ -42,7 +42,21 @@
 #define HMB_FLAME_AURA_EN 1
 #define HMB_FLAME_AURA_STRENGTH 75
 #define HMB_FLAME_AURA_RADIUS 40
-#define HMB_FLAME_SCALE_PERCENT 125
+#define HMB_FLAME_SCALE_PERCENT 150
+// Mood Aura: dezente seitliche Farbfelder, unabhaengig von der Flamme.
+#define HMB_FLAME_MOOD_EN 1
+#define HMB_FLAME_MOOD_DEFAULT_COLOR 0x4080FF
+#define HMB_FLAME_MOOD_DEFAULT_INTENSITY 12 // 0..100
+#define HMB_FLAME_MOOD_TRANSITION_MS 2000
+
+// Magic Sparkle: seltene Lichtsterne links/rechts im oberen Drittel.
+#define HMB_FLAME_SPARKLE_EN 1
+#define HMB_FLAME_SPARKLE_MIN_MS 15000
+#define HMB_FLAME_SPARKLE_MAX_MS 40000
+#define HMB_FLAME_SPARKLE_MAX_ACTIVE 4
+#define HMB_FLAME_SPARKLE_INTENSITY 100 // 0..100
+#define HMB_FLAME_SPARKLE_STAR_CHANCE 100 // Prozent: Kreuz statt Lichtpunkt
+#define HMB_FLAME_SPARKLE_TEST_MODE 1 // 1 = alle 5s EIN grosser Stern, links/rechts abwechselnd
 
 // Displaytypen
 #define HMB_EYE_GC9D01_160 1

@@ -4,6 +4,7 @@
 #include "button.h"
 
 #include <string>
+#include <cstdint>
 
 enum class HmbEyeExpression {
     Neutral,
@@ -41,3 +42,9 @@ public:
 private:
     DeviceState state_=kDeviceStateUnknown;
 };
+
+// FlameEngine Mood Aura (RGB888, Intensitaet 0..100, weicher Uebergang).
+// Aufruf auch aus anderen XiaoZhi-Modulen moeglich.
+void HmbFlameSetMoodColor(uint32_t rgb);
+void HmbFlameSetMoodIntensity(uint8_t intensity);
+void HmbFlameSetMoodTransition(uint32_t milliseconds);
