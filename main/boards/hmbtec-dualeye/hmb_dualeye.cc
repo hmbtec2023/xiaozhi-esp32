@@ -388,6 +388,7 @@ static void push(spi_device_handle_t d,bool mirror=false){
             line[x*2+1]=(uint8_t)(c&0xFF);
         }
         txBytes(d,line,sizeof(line));
+        if((y&15)==15) vTaskDelay(1); // IDLE0 darf laufen, auch bei langer SPI-Uebertragung
     }
 }
 
@@ -511,21 +512,30 @@ static void updateSparkles(int64_t nowUs){
     }
     if(sparkleNextUs==0) sparkleNextUs=nowUs+(int64_t)(HMB_FLAME_SPARKLE_TEST_MODE?1000:sparkleRandomRange(HMB_FLAME_SPARKLE_MIN_MS,HMB_FLAME_SPARKLE_MAX_MS))*1000;
     if(nowUs<sparkleNextUs) return;
-    int count=HMB_FLAME_SPARKLE_TEST_MODE?1:((sparkleRandomRange(0,99)<15)?2:1);
-    const int firstSide=(sparkleEvents++ & 1U);
-    if(count>HMB_FLAME_SPARKLE_MAX_ACTIVE) count=HMB_FLAME_SPARKLE_MAX_ACTIVE;
-    for(int i=0;i<count;i++){
-        HmbSparkle &s=sparkles[i];
-        const bool left=((i+firstSide)&1)==0;
+    // Meist ein Stern, gelegentlich zwei, selten drei oder vier.
+    const uint32_t roll=sparkleRandomRange(0,99);
+    const int requested=HMB_FLAME_SPARKLE_TEST_MODE?2:(roll<2?4:(roll<10?3:(roll<35?2:1)));
+    const int countLimit=requested<HMB_FLAME_SPARKLE_MAX_ACTIVE?requested:HMB_FLAME_SPARKLE_MAX_ACTIVE;
+    int created=0;
+    float firstX=0.0f,firstY=0.0f;
+    uint32_t firstDuration=0;
+    for(auto &s:sparkles){
+        if(created>=countLimit) break;
+        if(s.active) continue; // Laufende und vorgemerkte Sterne nicht ueberschreiben.
+        const bool left=sparkleRandomRange(0,1)==0;
         s.x=(float)(left?sparkleRandomRange(65,86):sparkleRandomRange(154,175));
         s.y=(float)sparkleRandomRange(53,83);
-        s.startUs=nowUs+(i==1?300000:0);
-        s.durationMs=HMB_FLAME_SPARKLE_TEST_MODE?3500:sparkleRandomRange(1400,2000);
+        // Kurze zufaellige Staffelung statt gleichzeitiger Aktivierung.
+        s.startUs=nowUs+(int64_t)(created==0?0:sparkleRandomRange(200,950)*created)*1000;
+        s.durationMs=HMB_FLAME_SPARKLE_TEST_MODE?3500:sparkleRandomRange(1400,2400);
         s.star=sparkleRandomRange(0,99)<HMB_FLAME_SPARKLE_STAR_CHANCE;
         s.active=true;
+        if(created==0){firstX=s.x;firstY=s.y;firstDuration=s.durationMs;}
+        ++created;
     }
+    ++sparkleEvents;
     sparkleNextUs=nowUs+(int64_t)(HMB_FLAME_SPARKLE_TEST_MODE?5000:sparkleRandomRange(HMB_FLAME_SPARKLE_MIN_MS,HMB_FLAME_SPARKLE_MAX_MS))*1000;
-    ESP_LOGI(TAG,"MagicSparkle event=%lu count=%d first=(%.0f,%.0f) duration=%lu ms",(unsigned long)sparkleEvents,count,sparkles[0].x,sparkles[0].y,(unsigned long)sparkles[0].durationMs);
+    ESP_LOGI(TAG,"MagicSparkle event=%lu requested=%d created=%d first=(%.0f,%.0f) duration=%lu ms",(unsigned long)sparkleEvents,requested,created,firstX,firstY,(unsigned long)firstDuration);
 }
 static float sparkleAt(int x,int y,int64_t nowUs){
     float light=0.0f;
@@ -565,43 +575,56 @@ static void renderFlame(float t,DeviceState state){
     const float height=151.0f*scale*flicker;
     const float auraStrength=HMB_FLAME_AURA_STRENGTH/100.0f;
     const float auraRadius=(float)HMB_FLAME_AURA_RADIUS;
+    // Teure trigonometrische und Potenzfunktionen nur einmal pro Bildzeile.
+    const float moodStrength=moodCurrentIntensity/100.0f*0.62f;
+    float moodX[W];
+    for(int x=0;x<W;x++){
+        const float nx=((float)x-W*0.5f)/(float)W;
+        const float ax=(fabsf(nx)-0.33f)/0.19f;
+        const float mask=fminf(1.0f,fmaxf(0.0f,(fabsf(nx)-0.11f)/0.13f));
+        moodX[x]=expf(-2.0f*ax*ax)*mask;
+    }
     for(int y=0;y<H;y++){
         float u=(baseY-y)/height;
+        const float uc=fmaxf(0.0f,fminf(1.0f,u));
+        const bool flameRow=(u>-0.25f && u<1.23f);
+        const float bend=flameRow?(sway*uc*uc+2.2f*sinf(t*3.7f+uc*5.0f)*uc*uc):0.0f;
+        const float cx=W*0.5f+bend;
+        float width=0.0f;
+        if(flameRow){
+            width=(3.0f+33.0f*powf(fmaxf(0.0f,1.0f-uc),0.72f)*sinf(3.14159265f*powf(uc,0.64f)))*scale;
+            width*=1.0f+0.07f*sinf(t*4.9f+uc*8.0f);
+        }
+        const float cap=fminf(1.0f,fmaxf(0.0f,(baseY-y)/9.0f))*fminf(1.0f,fmaxf(0.0f,(baseY-height*0.99f-y)/(-height*0.01f)));
+        const float glowMod=0.72f+0.28f*sinf(3.14159265f*uc);
+        const float vertical=(u<0.0f)?(-u*height):((u>1.0f)?((u-1.0f)*height):0.0f);
+        const float ny=((float)y-H*0.56f)/(float)H;
+        const float ay=ny/0.33f;
+        const float moodY=expf(-2.0f*ay*ay)*moodStrength;
+        const float wickX=W*0.5f+1.3f*sinf((baseY-5.0f-y)*0.16f);
+        const float emberX=W*0.5f+1.3f*sinf(13.0f*0.16f);
+        const float ey=y-(baseY-15.0f);
+        const float emberY=expf(-ey*ey/8.0f);
         for(int x=0;x<W;x++){
             float r=0.0f,g=0.0f,b=0.0f;
 #if HMB_FLAME_MOOD_EN
             // Zwei diffuse, seitliche Farbfelder. Nicht im Zentrum der Flamme.
             // Maximalintensitaet bewusst gering: Mood bleibt Hintergrundlicht.
-            const float nx=((float)x-W*0.5f)/(float)W;
-            const float ny=((float)y-H*0.56f)/(float)H;
-            const float ax=(fabsf(nx)-0.33f)/0.19f;
-            const float ay=ny/0.33f;
-            const float moodFalloff=expf(-2.0f*(ax*ax+ay*ay));
-            const float centerMask=fminf(1.0f,fmaxf(0.0f,(fabsf(nx)-0.11f)/0.13f));
-            const float moodLevel=(moodCurrentIntensity/100.0f)*moodFalloff*centerMask*0.62f;
+            const float moodLevel=moodX[x]*moodY;
             r+=moodCurrentR*moodLevel;
             g+=moodCurrentG*moodLevel;
             b+=moodCurrentB*moodLevel;
 #endif
-            if(u>-0.25f && u<1.23f){
-                float uc=fmaxf(0.0f,fminf(1.0f,u));
-                float bend=sway*uc*uc+2.2f*sinf(t*3.7f+uc*5.0f)*uc*uc;
-                float cx=W*0.5f+bend;
-                // Flamme: schmaler, runder Fuß; breiter Bauch; feine bewegliche Spitze.
-                float width=(3.0f+33.0f*powf(fmaxf(0.0f,1.0f-uc),0.72f)*sinf(3.14159265f*powf(uc,0.64f)))*scale;
-                width*=1.0f+0.07f*sinf(t*4.9f+uc*8.0f);
+            if(flameRow){
                 float dx=fabsf((float)x-cx);
-                float cap=fminf(1.0f,fmaxf(0.0f,(baseY-y)/9.0f));
-                cap*=fminf(1.0f,fmaxf(0.0f,(baseY-height*0.99f-y)/(-height*0.01f)));
                 float inside=(width-dx)/3.0f;
                 float alpha=fmaxf(0.0f,fminf(1.0f,inside))*cap;
 #if HMB_FLAME_AURA_EN
                 // Konturfolgende, weich auslaufende Aura; keine zusätzliche Bilddatei.
                 float dist=fmaxf(0.0f,dx-width);
-                float vertical=(u<0.0f)?(-u*height):((u>1.0f)?((u-1.0f)*height):0.0f);
                 float d=sqrtf(dist*dist+vertical*vertical);
                 float glow=expf(-d*d/(2.0f*auraRadius*auraRadius))*auraStrength;
-                glow*=0.72f+0.28f*sinf(3.14159265f*uc);
+                glow*=glowMod;
                 r+=35.0f*glow; g+=11.0f*glow; b+=1.5f*glow;
 #endif
                 if(alpha>0.0f){
@@ -620,13 +643,11 @@ static void renderFlame(float t,DeviceState state){
             }
             // Angedeuteter, leicht gebogener Docht, sichtbar im unteren Flammenbereich.
             float wickY=baseY-5.0f;
-            float wickX=W*0.5f+1.3f*sinf((wickY-y)*0.16f);
             if(y>=baseY-18.0f && y<=baseY+2.0f && fabsf(x-wickX)<1.65f){
                 r=17.0f;g=15.0f;b=13.0f;
             }
-            float emberX=W*0.5f+1.3f*sinf(13.0f*0.16f);
-            float ex=x-emberX,ey=y-(baseY-15.0f);
-            float ember=expf(-(ex*ex+ey*ey)/8.0f);
+            float ex=x-emberX;
+            float ember=expf(-ex*ex/8.0f)*emberY;
             r=fmaxf(r,240.0f*ember);g=fmaxf(g,70.0f*ember);b=fmaxf(b,7.0f*ember);
 #if HMB_FLAME_SPARKLE_EN
             // Grosser Stern mit weichen Strahlen; im Testmodus einzeln links/rechts.
@@ -638,6 +659,7 @@ static void renderFlame(float t,DeviceState state){
             uint8_t B=(uint8_t)fminf(255.0f,fmaxf(0.0f,b));
             fb[y*W+x]=((R&0xF8)<<8)|((G&0xFC)<<3)|(B>>3);
         }
+        if((y&15)==15) vTaskDelay(1); // IDLE0 auch waehrend rechenintensivem Rendering
     }
 }
 #endif
@@ -648,10 +670,25 @@ static void task(void*){
 
     while(true){
 #if HMB_DISPLAY_MODE == 1
-        renderFlame((float)esp_timer_get_time()/1000000.0f,eyeState);
+        const int64_t frameStart=esp_timer_get_time();
+        renderFlame((float)frameStart/1000000.0f,eyeState);
+        const int64_t renderEnd=esp_timer_get_time();
         push(devL,false);
         push(devR,HMB_FLAME_BACK_MIRROR!=0);
-        vTaskDelay(pdMS_TO_TICKS(45));
+        const int64_t frameEnd=esp_timer_get_time();
+        static uint32_t frameCount=0;
+        static int64_t totalFrameUs=0,totalRenderUs=0,totalPushUs=0;
+        totalFrameUs+=frameEnd-frameStart;
+        totalRenderUs+=renderEnd-frameStart;
+        totalPushUs+=frameEnd-renderEnd;
+        if(++frameCount>=120){
+            ESP_LOGI(TAG,"Flame timing avg: render=%lld ms SPI=%lld ms total=%lld ms",(long long)(totalRenderUs/120/1000),(long long)(totalPushUs/120/1000),(long long)(totalFrameUs/120/1000));
+            frameCount=0;totalFrameUs=0;totalRenderUs=0;totalPushUs=0;
+        }
+        // 30 FPS als Obergrenze; keine zusaetzliche feste 45-ms-Wartezeit.
+        const int64_t remainingUs=33333-(esp_timer_get_time()-frameStart);
+        if(remainingUs>1000) vTaskDelay(pdMS_TO_TICKS((remainingUs+999)/1000));
+        else vTaskDelay(1); // taskYIELD allein gibt IDLE0 nicht verlaesslich CPU-Zeit
         continue;
 #endif
         int64_t now=esp_timer_get_time()/1000;

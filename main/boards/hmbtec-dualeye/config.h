@@ -56,7 +56,7 @@
 #define HMB_FLAME_SPARKLE_MAX_ACTIVE 4
 #define HMB_FLAME_SPARKLE_INTENSITY 100 // 0..100
 #define HMB_FLAME_SPARKLE_STAR_CHANCE 100 // Prozent: Kreuz statt Lichtpunkt
-#define HMB_FLAME_SPARKLE_TEST_MODE 1 // 1 = alle 5s EIN grosser Stern, links/rechts abwechselnd
+#define HMB_FLAME_SPARKLE_TEST_MODE 0 // 1 = alle 5s ZWEI zeitversetzte Sterne
 
 // Displaytypen
 #define HMB_EYE_GC9D01_160 1

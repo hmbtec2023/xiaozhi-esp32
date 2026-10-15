@@ -7,7 +7,7 @@ source /Users/hmb/.espressif/tools/activate_idf_v6.1.sh
 grep -E "CONFIG_BOARD_TYPE_|CONFIG_OLED_" sdkconfig | grep "=y"
 
 ============================================================
- DualEye
+ DualEye  (mit DualFlame)
 ============================================================
 
 ## 16 MB – Octal PSRAM (XH-S3E-AI_V1.0)
