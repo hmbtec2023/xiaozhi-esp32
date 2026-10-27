@@ -42,7 +42,7 @@
 
 #define TAG "sensecap_watcher"
 
-// HMB Persona V0.3.17: Kamera-Callback schreibt nur atomare Messwerte.
+// HMB Persona V0.3.18: Kamera-Callback schreibt nur atomare Messwerte.
 // LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
 static std::atomic<int> hmb_persona_stage{0};
 static std::atomic<int> hmb_persona_error{0};
@@ -141,7 +141,7 @@ class CustomLcdDisplay : public SpiLcdDisplay {
             lv_obj_add_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
 
 
-            // HMB_PERSONA_V0317: Live-Anzeige statt Versionsmeldung.
+            // HMB_PERSONA_V0318: Live-Anzeige statt Versionsmeldung.
             // Die erprobte Position und schwarze Schrift bleiben erhalten.
             lv_obj_t* persona_screen = lv_obj_get_screen(bottom_bar_);
             persona_label_ = lv_label_create(persona_screen);
@@ -166,8 +166,13 @@ class CustomLcdDisplay : public SpiLcdDisplay {
                 if (!fresh) {
                     const int stage = hmb_persona_stage.load(std::memory_order_acquire);
                     const int error = hmb_persona_error.load(std::memory_order_relaxed);
+                    // Fehlende Inferenz-Frames waehrend der KI-Kommunikation sind
+                    // erwartbar: Inferenz ist nur im Idle-Zustand aktiv.
+                    const bool inference_paused =
+                        Application::GetInstance().GetDeviceState() != kDeviceStateIdle;
                     const char* detail = stage == 0 ? "INIT" : stage == 1 ? "STARTET" :
-                        stage == 2 ? "LAEUFT / KEIN FRAME" : stage == 3 ? "FRAME TIMEOUT" :
+                        stage == 2 ? "LAEUFT / KEIN FRAME" :
+                        stage == 3 ? (inference_paused ? "ERKENNUNG PAUSIERT" : "KEIN NEUER FRAME") :
                         stage == 4 ? "GESTOPPT" : "STARTFEHLER";
                     snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\n%s (%d)", detail, error);
                 } else if (hmb_persona_present.load(std::memory_order_relaxed)) {

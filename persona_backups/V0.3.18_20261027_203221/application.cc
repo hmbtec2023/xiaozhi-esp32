@@ -70,18 +70,9 @@ void Application::Initialize() {
     // Setup the display
     auto display = board.GetDisplay();
     display->SetupUI();
-    // Print board name/version info
-    // HMB|TEC Persona Light: sichtbare Firmware-Kennung beim Start.
-    // Verwendet ausschliesslich die bestehende XiaoZhi-Display-API.
-    // Die normale XiaoZhi-Statusanzeige darf diese Startmeldung spaeter ersetzen.
-
-    // HMB|TEC Persona Light V0.2.2
-    // Versionskennung nur im seriellen Monitor.
-    // Keine Textausgabe mehr im unteren Chatbereich.
-    ESP_LOGI(TAG, "[PERSONA] HMB|TEC Persona Light V0.2.2");
-
-    // Versionsmeldung im vorhandenen Statusbereich.
-    display->SetStatus("Persona Light V0.2.2");
+    // HMB|TEC Persona Light V0.2.3
+    // Eigene Anzeige wird im Watcher-Display erzeugt.
+    ESP_LOGI(TAG, "[PERSONA] HMB|TEC Persona Light V0.2.3");
 
     // Setup the audio service
     auto codec = board.GetAudioCodec();
@@ -368,7 +359,7 @@ void Application::HandleActivationDoneEvent() {
     const bool has_error = !last_error_message_.empty();
     if (!startup_completed_) {
         startup_completed_ = true;
-        pending_startup_wake_word_hint_ = !has_error;
+        pending_startup_wake_word_hint_ = false; // HMB: Start-Laufschrift deaktiviert
     }
     if (!has_error) {
         auto display = Board::GetInstance().GetDisplay();

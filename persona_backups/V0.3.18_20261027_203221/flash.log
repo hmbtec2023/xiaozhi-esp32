@@ -1,0 +1,190 @@
+[0/2] Re-checking globbed directories...
+[1/5] cd /Users/hmb/Documents/xiaozhi-persona-light/build && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/hmb/Documents/xiaozhi-persona-light/build/partition_table/partition-table.bin /Users/hmb/Documents/xiaozhi-persona-light/build/xiaozhi.bin
+xiaozhi.bin binary size 0x2cb550 bytes. Smallest app partition is 0x3f0000 bytes. 0x124ab0 bytes (29%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader/bootloader.bin
+Bootloader binary size 0x4160 bytes. 0x3ea0 bytes (49%) free.
+[3/5] No install step for 'bootloader'
+[4/5] Completed 'bootloader'
+Adding "flash"'s dependency "all" to list of commands with default set of options.
+Executing action: all (aliases: build)
+Running ninja in directory /Users/hmb/Documents/xiaozhi-persona-light/build
+Executing "ninja all"...
+Executing action: flash
+Serial port /dev/cu.wchusbserial5A8A0534903:
+Connecting....
+Detecting chip type... ESP32-S3
+Running ninja in directory /Users/hmb/Documents/xiaozhi-persona-light/build
+Executing "ninja flash"...
+[0/2] Re-checking globbed directories...
+[1/6] cd /Users/hmb/Documents/xiaozhi-persona-light/build && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/hmb/Documents/xiaozhi-persona-light/build/partition_table/partition-table.bin /Users/hmb/Documents/xiaozhi-persona-light/build/xiaozhi.bin
+xiaozhi.bin binary size 0x2cb550 bytes. Smallest app partition is 0x3f0000 bytes. 0x124ab0 bytes (29%) free.
+[2/6] Performing build step for 'bootloader'
+[1/1] cd /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader/bootloader.bin
+Bootloader binary size 0x4160 bytes. 0x3ea0 bytes (49%) free.
+[3/6] No install step for 'bootloader'
+[4/6] Completed 'bootloader'
+[4/6] Running utility command for flash
+esptool --chip esp32s3 -p /dev/cu.wchusbserial5A8A0534903 -b 460800 --before=default-reset --after=hard-reset write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin 0x800000 generated_assets.bin 0x20000 xiaozhi.bin --diff-with bootloader/bootloader_flashed.bin partition_table/partition-table_flashed.bin ota_data_initial_flashed.bin generated_assets_flashed.bin xiaozhi_flashed.bin
+esptool v5.4.0
+Serial port /dev/cu.wchusbserial5A8A0534903:
+Connecting....
+Connected to ESP32-S3 on /dev/cu.wchusbserial5A8A0534903:
+Chip type:          ESP32-S3 (QFN56) (revision v0.2)
+Features:           Wi-Fi, BT 5 (LE), Dual Core + LP Core, 240MHz, Embedded PSRAM 8MB (AP_3v3)
+Crystal frequency:  40MHz
+MAC:                1c:db:d4:5c:ca:54
+
+Uploading stub flasher...
+Running stub flasher...
+Stub flasher running.
+Changing baud rate to 460800...
+Changed.
+
+Configuring flash size...
+
+Writing 'bootloader/bootloader.bin' at 0x00000000...
+SHA digest in image updated.
+SHA digest in image updated.
+No changed sectors found, verifying if data is in flash...
+'bootloader/bootloader.bin' at 0x00000000 verified.
+
+Writing 'partition_table/partition-table.bin' at 0x00008000...
+No changed sectors found, verifying if data is in flash...
+'partition_table/partition-table.bin' at 0x00008000 verified.
+
+Writing 'ota_data_initial.bin' at 0x0000d000...
+No changed sectors found, verifying if data is in flash...
+NOTE: Data not found in flash, flashing the whole image...
+Flash will be erased from 0x0000d000 to 0x0000efff...
+Compressed 8192 bytes to 31...
+Writing at 0x0000f000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.0% 31B/31B [0s] 
+Wrote 8192 bytes (31 compressed) at 0x0000d000 in 0.1 seconds (572.8 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Writing 'generated_assets.bin' at 0x00800000...
+No changed sectors found, verifying if data is in flash...
+'generated_assets.bin' at 0x00800000 verified.
+
+Writing 'xiaozhi.bin' at 0x00020000...
+Changed data sectors found, fast reflashing...
+Reflashing 1 changed sector at 0x00020000...
+Flash will be erased from 0x00020000 to 0x00020fff...
+Compressed 4096 bytes to 1938...
+Writing at 0x00021000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.0% 1.89kB/1.89kB [0s] 
+Wrote 4096 bytes (1938 compressed) at 0x00020000 in 0.0 seconds (677.5 kbit/s).
+Reflashing 706 changed sectors at 0x0002a000...
+Flash will be erased from 0x0002a000 to 0x002ebfff...
+Compressed 2891776 bytes to 1719474...
+Writing at 0x000361c2                                  1.0% 16.00kB/1.64MB [0s] 
+Writing at 0x00044c9a ╸                                1.9% 32.00kB/1.64MB [0s] 
+Writing at 0x00050a11 ╸                                2.9% 48.00kB/1.64MB [1s] 
+Writing at 0x00055ccf ━                                3.8% 64.00kB/1.64MB [2s] 
+Writing at 0x0005a029 ━                                4.8% 80.00kB/1.64MB [2s] 
+Writing at 0x0005e2e7 ━╸                               5.7% 96.00kB/1.64MB [2s] 
+Writing at 0x0006266b ━━                               6.7% 112.00kB/1.64MB [3s] 
+Writing at 0x0006c661 ━━                               7.6% 128.00kB/1.64MB [3s] 
+Writing at 0x00076bee ━━╸                              8.6% 144.00kB/1.64MB [4s] 
+Writing at 0x000845a0 ━━╸                              9.5% 160.00kB/1.64MB [4s] 
+Writing at 0x0008ee3f ━━━                             10.5% 176.00kB/1.64MB [5s] 
+Writing at 0x000983cb ━━━                             11.4% 192.00kB/1.64MB [5s] 
+Writing at 0x000a1422 ━━━╸                            12.4% 208.00kB/1.64MB [6s] 
+Writing at 0x000ae50e ━━━━                            13.3% 224.00kB/1.64MB [6s] 
+Writing at 0x000bf0c8 ━━━━                            14.3% 240.00kB/1.64MB [7s] 
+Writing at 0x000c4125 ━━━━╸                           15.2% 256.00kB/1.64MB [7s] 
+Writing at 0x000caf7e ━━━━╸                           16.2% 272.00kB/1.64MB [8s] 
+Writing at 0x000d0b32 ━━━━━                           17.2% 288.00kB/1.64MB [8s] 
+Writing at 0x000d610d ━━━━━                           18.1% 304.00kB/1.64MB [9s] 
+Writing at 0x000daecf ━━━━━╸                          19.1% 320.00kB/1.64MB [9s] 
+Writing at 0x000e025e ━━━━━━                          20.0% 336.00kB/1.64MB [9s] 
+Writing at 0x000e6a98 ━━━━━━                          21.0% 352.00kB/1.64MB [10s] 
+Writing at 0x000ee9a8 ━━━━━━╸                         21.9% 368.00kB/1.64MB [10s] 
+Writing at 0x000f8896 ━━━━━━╸                         22.9% 384.00kB/1.64MB [11s] 
+Writing at 0x000fee14 ━━━━━━━                         23.8% 400.00kB/1.64MB [11s] 
+Writing at 0x00104df5 ━━━━━━━                         24.8% 416.00kB/1.64MB [11s] 
+Writing at 0x0010a6a4 ━━━━━━━╸                        25.7% 432.00kB/1.64MB [12s] 
+Writing at 0x00110175 ━━━━━━━━                        26.7% 448.00kB/1.64MB [12s] 
+Writing at 0x0011557f ━━━━━━━━                        27.6% 464.00kB/1.64MB [13s] 
+Writing at 0x0011b0fb ━━━━━━━━╸                       28.6% 480.00kB/1.64MB [13s] 
+Writing at 0x00120b2f ━━━━━━━━╸                       29.5% 496.00kB/1.64MB [13s] 
+Writing at 0x00126687 ━━━━━━━━━                       30.5% 512.00kB/1.64MB [14s] 
+Writing at 0x0012c1bd ━━━━━━━━━                       31.4% 528.00kB/1.64MB [14s] 
+Writing at 0x001316f7 ━━━━━━━━━╸                      32.4% 544.00kB/1.64MB [15s] 
+Writing at 0x00136e43 ━━━━━━━━━━                      33.3% 560.00kB/1.64MB [15s] 
+Writing at 0x0013c8b1 ━━━━━━━━━━                      34.3% 576.00kB/1.64MB [15s] 
+Writing at 0x00142438 ━━━━━━━━━━╸                     35.3% 592.00kB/1.64MB [16s] 
+Writing at 0x001486b0 ━━━━━━━━━━╸                     36.2% 608.00kB/1.64MB [16s] 
+Writing at 0x0014dbfb ━━━━━━━━━━━                     37.2% 624.00kB/1.64MB [17s] 
+Writing at 0x001531ea ━━━━━━━━━━━                     38.1% 640.00kB/1.64MB [17s] 
+Writing at 0x00158db8 ━━━━━━━━━━━╸                    39.1% 656.00kB/1.64MB [17s] 
+Writing at 0x0015efaa ━━━━━━━━━━━━                    40.0% 672.00kB/1.64MB [18s] 
+Writing at 0x00164e28 ━━━━━━━━━━━━                    41.0% 688.00kB/1.64MB [18s] 
+Writing at 0x0016bd28 ━━━━━━━━━━━━╸                   41.9% 704.00kB/1.64MB [19s] 
+Writing at 0x00186a17 ━━━━━━━━━━━━╸                   42.9% 720.00kB/1.64MB [19s] 
+Writing at 0x00190886 ━━━━━━━━━━━━━                   43.8% 736.00kB/1.64MB [20s] 
+Writing at 0x00197d23 ━━━━━━━━━━━━━                   44.8% 752.00kB/1.64MB [20s] 
+Writing at 0x0019cd38 ━━━━━━━━━━━━━╸                  45.7% 768.00kB/1.64MB [20s] 
+Writing at 0x001a1cd3 ━━━━━━━━━━━━━━                  46.7% 784.00kB/1.64MB [21s] 
+Writing at 0x001a6c58 ━━━━━━━━━━━━━━                  47.6% 800.00kB/1.64MB [21s] 
+Writing at 0x001abcc9 ━━━━━━━━━━━━━━╸                 48.6% 816.00kB/1.64MB [22s] 
+Writing at 0x001b12ab ━━━━━━━━━━━━━━╸                 49.5% 832.00kB/1.64MB [22s] 
+Writing at 0x001b62cb ━━━━━━━━━━━━━━━                 50.5% 848.00kB/1.64MB [22s] 
+Writing at 0x001bb269 ━━━━━━━━━━━━━━━                 51.5% 864.00kB/1.64MB [23s] 
+Writing at 0x001c0553 ━━━━━━━━━━━━━━━╸                52.4% 880.00kB/1.64MB [23s] 
+Writing at 0x001c65d3 ━━━━━━━━━━━━━━━━                53.4% 896.00kB/1.64MB [24s] 
+Writing at 0x001ce266 ━━━━━━━━━━━━━━━━                54.3% 912.00kB/1.64MB [24s] 
+Writing at 0x001d6b14 ━━━━━━━━━━━━━━━━╸               55.3% 928.00kB/1.64MB [25s] 
+Writing at 0x001ddec3 ━━━━━━━━━━━━━━━━╸               56.2% 944.00kB/1.64MB [25s] 
+Writing at 0x001e36d5 ━━━━━━━━━━━━━━━━━               57.2% 960.00kB/1.64MB [25s] 
+Writing at 0x001e88eb ━━━━━━━━━━━━━━━━━               58.1% 976.00kB/1.64MB [26s] 
+Writing at 0x001ee48c ━━━━━━━━━━━━━━━━━╸              59.1% 992.00kB/1.64MB [26s] 
+Writing at 0x001f3b89 ━━━━━━━━━━━━━━━━━━              60.0% 1008.00kB/1.64MB [27s] 
+Writing at 0x001f8f7d ━━━━━━━━━━━━━━━━━━              61.0% 1.00MB/1.64MB [27s] 
+Writing at 0x001fe589 ━━━━━━━━━━━━━━━━━━╸             61.9% 1.02MB/1.64MB [27s] 
+Writing at 0x00203f2d ━━━━━━━━━━━━━━━━━━╸             62.9% 1.03MB/1.64MB [28s] 
+Writing at 0x0020af5b ━━━━━━━━━━━━━━━━━━━             63.8% 1.05MB/1.64MB [28s] 
+Writing at 0x00210ab3 ━━━━━━━━━━━━━━━━━━━             64.8% 1.06MB/1.64MB [29s] 
+Writing at 0x002174bd ━━━━━━━━━━━━━━━━━━━╸            65.7% 1.08MB/1.64MB [29s] 
+Writing at 0x0021d735 ━━━━━━━━━━━━━━━━━━━━            66.7% 1.09MB/1.64MB [29s] 
+Writing at 0x00222e21 ━━━━━━━━━━━━━━━━━━━━            67.7% 1.11MB/1.64MB [30s] 
+Writing at 0x00227e9e ━━━━━━━━━━━━━━━━━━━━╸           68.6% 1.12MB/1.64MB [30s] 
+Writing at 0x0022d2df ━━━━━━━━━━━━━━━━━━━━╸           69.6% 1.14MB/1.64MB [31s] 
+Writing at 0x00232618 ━━━━━━━━━━━━━━━━━━━━━           70.5% 1.16MB/1.64MB [31s] 
+Writing at 0x00237c20 ━━━━━━━━━━━━━━━━━━━━━           71.5% 1.17MB/1.64MB [31s] 
+Writing at 0x0023d6eb ━━━━━━━━━━━━━━━━━━━━━╸          72.4% 1.19MB/1.64MB [32s] 
+Writing at 0x00242992 ━━━━━━━━━━━━━━━━━━━━━━          73.4% 1.20MB/1.64MB [32s] 
+Writing at 0x00247bf9 ━━━━━━━━━━━━━━━━━━━━━━          74.3% 1.22MB/1.64MB [33s] 
+Writing at 0x0024d14c ━━━━━━━━━━━━━━━━━━━━━━╸         75.3% 1.23MB/1.64MB [33s] 
+Writing at 0x00252870 ━━━━━━━━━━━━━━━━━━━━━━╸         76.2% 1.25MB/1.64MB [33s] 
+Writing at 0x00257fdc ━━━━━━━━━━━━━━━━━━━━━━━         77.2% 1.27MB/1.64MB [34s] 
+Writing at 0x0025d301 ━━━━━━━━━━━━━━━━━━━━━━━         78.1% 1.28MB/1.64MB [34s] 
+Writing at 0x002628ac ━━━━━━━━━━━━━━━━━━━━━━━╸        79.1% 1.30MB/1.64MB [35s] 
+Writing at 0x00267bd9 ━━━━━━━━━━━━━━━━━━━━━━━━        80.0% 1.31MB/1.64MB [35s] 
+Writing at 0x0026ccb8 ━━━━━━━━━━━━━━━━━━━━━━━━        81.0% 1.33MB/1.64MB [35s] 
+Writing at 0x002724c3 ━━━━━━━━━━━━━━━━━━━━━━━━╸       81.9% 1.34MB/1.64MB [36s] 
+Writing at 0x00277be1 ━━━━━━━━━━━━━━━━━━━━━━━━╸       82.9% 1.36MB/1.64MB [36s] 
+Writing at 0x0027d098 ━━━━━━━━━━━━━━━━━━━━━━━━━       83.9% 1.38MB/1.64MB [37s] 
+Writing at 0x002823fa ━━━━━━━━━━━━━━━━━━━━━━━━━       84.8% 1.39MB/1.64MB [37s] 
+Writing at 0x00287961 ━━━━━━━━━━━━━━━━━━━━━━━━━╸      85.8% 1.41MB/1.64MB [37s] 
+Writing at 0x0028d5fe ━━━━━━━━━━━━━━━━━━━━━━━━━━      86.7% 1.42MB/1.64MB [38s] 
+Writing at 0x0029292c ━━━━━━━━━━━━━━━━━━━━━━━━━━      87.7% 1.44MB/1.64MB [38s] 
+Writing at 0x00297ab6 ━━━━━━━━━━━━━━━━━━━━━━━━━━╸     88.6% 1.45MB/1.64MB [39s] 
+Writing at 0x0029cb61 ━━━━━━━━━━━━━━━━━━━━━━━━━━╸     89.6% 1.47MB/1.64MB [39s] 
+Writing at 0x002a22bd ━━━━━━━━━━━━━━━━━━━━━━━━━━━     90.5% 1.48MB/1.64MB [39s] 
+Writing at 0x002a7cfb ━━━━━━━━━━━━━━━━━━━━━━━━━━━     91.5% 1.50MB/1.64MB [40s] 
+Writing at 0x002b4841 ━━━━━━━━━━━━━━━━━━━━━━━━━━━╸    92.4% 1.52MB/1.64MB [40s] 
+Writing at 0x002bfbae ━━━━━━━━━━━━━━━━━━━━━━━━━━━━    93.4% 1.53MB/1.64MB [41s] 
+Writing at 0x002c84d7 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━    94.3% 1.55MB/1.64MB [41s] 
+Writing at 0x002cd81b ━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸   95.3% 1.56MB/1.64MB [41s] 
+Writing at 0x002d2d1f ━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸   96.2% 1.58MB/1.64MB [42s] 
+Writing at 0x002d8905 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   97.2% 1.59MB/1.64MB [42s] 
+Writing at 0x002df4f6 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   98.1% 1.61MB/1.64MB [43s] 
+Writing at 0x002e599a ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸  99.1% 1.62MB/1.64MB [43s] 
+Writing at 0x002ec000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100.0% 1.64MB/1.64MB [43s] 
+Wrote 2891776 bytes (1719474 compressed) at 0x0002a000 in 44.2 seconds (523.6 kbit/s).
+Verifying written data...
+Hash of data verified.
+
+Hard resetting via RTS pin...
+Done

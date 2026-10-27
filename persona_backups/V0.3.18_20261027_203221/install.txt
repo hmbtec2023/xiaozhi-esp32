@@ -1,0 +1,5 @@
+VERSION=V0.3.18
+ZIP=/Users/hmb/Documents/xiaozhi-persona-light/HMB_Persona_Light_UI_V0.3.18.zip
+BACKUP=/Users/hmb/Documents/xiaozhi-persona-light/persona_backups/V0.3.18_20261027_203221
+c1dd81ffcf5b1a3698906c864720058d08707a17f3f407ad58cc7620725de1fa  /Users/hmb/Documents/xiaozhi-persona-light/HMB_Persona_Light_UI_V0.3.18.zip
+BIN_SHA256=65c7523f5764929649d17808a0b6aee152d4164dab49368accca0dbfea90af29

@@ -1,0 +1,34 @@
+[0/2] Re-checking globbed directories...
+[1/13] Performing build step for 'bootloader'
+[1/1] cd /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /Users/hmb/Documents/xiaozhi-persona-light/build/bootloader/bootloader.bin
+Bootloader binary size 0x4160 bytes. 0x3ea0 bytes (49%) free.
+[2/13] No install step for 'bootloader'
+[3/13] Completed 'bootloader'
+[4/13] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/boards/sensecap-watcher/sensecap_audio_codec.cc.obj
+[5/13] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/boards/sensecap-watcher/sscma_camera.cc.obj
+[6/13] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/boards/sensecap-watcher/sensecap_watcher.cc.obj
+[7/13] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/application.cc.obj
+[8/13] Linking C static library esp-idf/main/libmain.a
+[9/13] Generating esp-idf/esp_system/ld/sections.ld
+Skipping linker script generation, section names unchanged
+[10/13] Linking CXX executable xiaozhi.elf
+[11/13] Generating binary image from built executable
+esptool v5.4.0
+Creating ESP32-S3 image...
+Merged 3 ELF sections.
+Successfully created ESP32-S3 image.
+Generated /Users/hmb/Documents/xiaozhi-persona-light/build/xiaozhi.bin
+[12/13] cd /Users/hmb/Documents/xiaozhi-persona-light/build && /Users/hmb/.espressif/python_env/idf6.1_py3.12_env/bin/python /Users/hmb/.espressif/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/hmb/Documents/xiaozhi-persona-light/build/partition_table/partition-table.bin /Users/hmb/Documents/xiaozhi-persona-light/build/xiaozhi.bin
+xiaozhi.bin binary size 0x2cb550 bytes. Smallest app partition is 0x3f0000 bytes. 0x124ab0 bytes (29%) free.
+Executing action: all (aliases: build)
+Running ninja in directory /Users/hmb/Documents/xiaozhi-persona-light/build
+Executing "ninja all"...
+
+Project build complete. To flash, run:
+ idf.py flash
+or
+ idf.py -p PORT flash
+or
+ python -m esptool --chip esp32s3 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 16MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x20000 build/xiaozhi.bin 0x800000 build/generated_assets.bin
+or from the "/Users/hmb/Documents/xiaozhi-persona-light/build" directory
+ python -m esptool --chip esp32s3 -b 460800 --before default-reset --after hard-reset write-flash "@flash_args"
