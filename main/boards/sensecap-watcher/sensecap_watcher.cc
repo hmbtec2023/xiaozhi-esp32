@@ -9,6 +9,7 @@
 #include "led/single_led.h"
 #include "power_save_timer.h"
 #include "sscma_camera.h"
+#include "persona_version.h"
 #include "lvgl_theme.h"
 
 #include <esp_log.h>
@@ -40,11 +41,19 @@
 
 // HMB Persona V0.3.0: Kamera-Callback schreibt nur atomare Messwerte.
 // LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
+static std::atomic<int> hmb_persona_stage{0};
+static std::atomic<int> hmb_persona_error{0};
 static std::atomic<int> hmb_persona_present{0};
 static std::atomic<int> hmb_persona_score{0};
 static std::atomic<int64_t> hmb_persona_last_us{0};
 
+extern "C" void HmbPersonaInferenceStatus(int stage, int error) {
+    hmb_persona_error.store(error, std::memory_order_relaxed);
+    hmb_persona_stage.store(stage, std::memory_order_release);
+}
+
 extern "C" void HmbPersonaCameraUpdate(int present, int score) {
+    hmb_persona_stage.store(3, std::memory_order_release);
     hmb_persona_present.store(present, std::memory_order_relaxed);
     hmb_persona_score.store(score, std::memory_order_relaxed);
     hmb_persona_last_us.store(esp_timer_get_time(), std::memory_order_release);
@@ -132,7 +141,7 @@ class CustomLcdDisplay : public SpiLcdDisplay {
             lv_obj_set_style_text_color(persona_label_, lv_color_hex(0x000000), 0);
             lv_obj_set_style_bg_opa(persona_label_, LV_OPA_TRANSP, 0);
             lv_obj_set_style_pad_all(persona_label_, 0, 0);
-            lv_label_set_text(persona_label_, "PERSONA LIGHT\nKAMERA: WARTE...");
+            lv_label_set_text(persona_label_, "PERSONA LIGHT " HMB_PERSONA_VERSION "\nKAMERA: WARTE...");
             lv_obj_align(persona_label_, LV_ALIGN_CENTER, 0,
                          lv_display_get_vertical_resolution(nullptr) * 15 / 100);
             lv_obj_move_foreground(persona_label_);
@@ -144,12 +153,17 @@ class CustomLcdDisplay : public SpiLcdDisplay {
                 const bool fresh = last != 0 && (esp_timer_get_time() - last) < 10000000LL;
                 char message[96];
                 if (!fresh) {
-                    snprintf(message, sizeof(message), "PERSONA LIGHT\nKAMERA: WARTE...");
+                    const int stage = hmb_persona_stage.load(std::memory_order_acquire);
+                    const int error = hmb_persona_error.load(std::memory_order_relaxed);
+                    const char* detail = stage == 0 ? "INIT" : stage == 1 ? "STARTET" :
+                        stage == 2 ? "LAEUFT / KEIN FRAME" : stage == 3 ? "FRAME TIMEOUT" :
+                        stage == 4 ? "GESTOPPT" : "STARTFEHLER";
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\n%s (%d)", detail, error);
                 } else if (hmb_persona_present.load(std::memory_order_relaxed)) {
-                    snprintf(message, sizeof(message), "PERSONA LIGHT\nPERSON ERKANNT\nSCORE: %d",
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\nPERSON ERKANNT\nSCORE: %d",
                              hmb_persona_score.load(std::memory_order_relaxed));
                 } else {
-                    snprintf(message, sizeof(message), "PERSONA LIGHT\nKEINE PERSON");
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\nKEINE PERSON");
                 }
                 lv_label_set_text(label, message);
             }, 500, persona_label_);

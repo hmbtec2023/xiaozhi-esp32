@@ -1,4 +1,5 @@
 #include "sscma_camera.h"
+#include "persona_version.h"
 #include "board.h"
 #include "config.h"
 #include "lvgl_display.h"
@@ -10,14 +11,19 @@
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <cstring>
+#include <atomic>
 #include "application.h"
 #include "sscma_client_commands.h"
 
 extern "C" void HmbPersonaCameraUpdate(int present, int score);
+extern "C" void HmbPersonaInferenceStatus(int stage, int error);
 
 #define TAG "SscmaCamera"
 
 #define IMG_JPEG_BUF_SIZE 48 * 1024
+
+// Updated only by real 416x416 inference replies.
+static std::atomic<int64_t> g_persona_last_frame_us{0};
 
 static bool __himax_keepalive_check(sscma_client_handle_t client) {
     esp_err_t ret = ESP_OK;
@@ -91,8 +97,6 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
         sscma_client_class_t* classes = NULL;
         int point_count = 0;
         sscma_client_point_t* points = NULL;
-        int model_type = 0;
-        int obj_cnt = 0;
 
         int width = 0, height = 0;
         cJSON* data = cJSON_GetObjectItem(reply->payload, "data");
@@ -108,8 +112,8 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
 
         switch ((width + height)) {
             case (416 + 416): {
+                g_persona_last_frame_us.store(esp_timer_get_time());
                 bool is_object_detected = false;
-                bool is_need_wake = false;
                 int persona_score = 0;
 
                 // 定期更新检测配置参数，避免频繁NVS访问
@@ -147,8 +151,6 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                             boxes[i].score > self->detect_threshold) {
                             is_object_detected = true;
                             persona_score = boxes[i].score;
-                            model_type = 0;
-                            obj_cnt++;
                             break;
                         }
                     }
@@ -163,8 +165,6 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                         if (classes[i].target == self->detect_target &&
                             classes[i].score > self->detect_threshold) {
                             is_object_detected = true;
-                            model_type = 1;
-                            obj_cnt++;
                         }
                     }
                     free(classes);
@@ -179,8 +179,6 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                         if (points[i].target == self->detect_target &&
                             points[i].score > self->detect_threshold) {
                             is_object_detected = true;
-                            model_type = 2;
-                            obj_cnt++;
                         }
                     }
                     free(points);
@@ -190,101 +188,17 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                 // 0/1 bedeutet Treffer fuer das konfigurierte Ziel, nicht Gesamtzahl.
                 HmbPersonaCameraUpdate(is_object_detected ? 1 : 0, persona_score);
 
-                // 如果需要开始冷却期，现在开始计时
-                if (self->need_start_cooldown) {  // 回调暂停，标志保持，等待回调恢复后开始计时
-                    self->state_start_time = cur_tm;
-                    self->need_start_cooldown = false;
-                    ESP_LOGI(TAG, "Starting cooldown timer");
-                }
-
-                // 状态机驱动的检测逻辑 - 只在人员出现时触发
-                switch (self->detection_state) {
-                    case SscmaCamera::IDLE:
-                        if (is_object_detected) {
-                            // 人员出现，开始验证（这是从无到有的转换）
-                            self->detection_state = SscmaCamera::VALIDATING;
-                            self->state_start_time = cur_tm;    // 记录物体出现时间
-                            self->last_detected_time = cur_tm;  // 初始化最后检测时间
-                            ESP_LOGI(TAG, "object appeared, starting validation");
-                        }
-                        break;
-
-                    case SscmaCamera::VALIDATING:
-                        if (is_object_detected) {
-                            // 更新最后检测到的时间
-                            self->last_detected_time = cur_tm;
-                            // 检查是否验证足够时间
-                            if ((cur_tm - self->state_start_time) >=
-                                (self->detect_duration_sec * 1000000)) {
-                                is_need_wake = true;
-                            }
-                        } else {
-                            // 验证期间人员离开，检查去抖动时间
-                            if (self->last_detected_time > 0 &&
-                                (cur_tm - self->last_detected_time) >=
-                                    self->detect_debounce_sec * 1000000LL) {
-                                // 去抖动时间已过，确认人员已离开，回到空闲
-                                self->detection_state = SscmaCamera::IDLE;
-                                self->last_detected_time = 0;
-                                ESP_LOGI(TAG,
-                                         "object left during validation (debounced), back to idle");
-                            }
-                        }
-                        break;
-
-                    case SscmaCamera::COOLDOWN:
-                        // 冷却期，需要满足两个条件：1)object离开 2)过了15秒
-                        if (!is_object_detected &&
-                            (cur_tm - self->state_start_time) >=
-                                (self->detect_invoke_interval_sec * 1000000LL)) {
-                            // object离开且冷却时间到，回到空闲状态
-                            self->detection_state = SscmaCamera::IDLE;
-                            ESP_LOGI(TAG,
-                                     "Cooldown complete and object left, back to idle - ready for "
-                                     "next appearance");
-                        }
-                        // 其他情况继续保持冷却状态
-                        break;
-                }
-
-                if (is_need_wake) {
-                    ESP_LOGI(TAG,
-                             "Validation complete, triggering conversation (type=%d, res=%dx%d)",
-                             self->detect_target, width, height);
-
-                    // 触发对话
-                    std::string wake_word;
-                    if (model_type == 0) {
-                        std::string cached_target_name = "object";
-                        if (self->model != NULL &&
-                            self->model->classes[self->detect_target] != NULL) {
-                            cached_target_name = self->model->classes[self->detect_target];
-                        }
-                        wake_word = "<detect>" + std::to_string(obj_cnt) + " " +
-                                    cached_target_name + " detected </detect>";
-                    } else if (model_type == 1) {
-                        std::string cached_target_name = "object";
-                        if (self->model != NULL &&
-                            self->model->classes[self->detect_target] != NULL) {
-                            cached_target_name = self->model->classes[self->detect_target];
-                        }
-                        wake_word = "<detect>" + std::to_string(obj_cnt) + " " +
-                                    cached_target_name + " detected </detect>";
-                    } else if (model_type == 2) {
-                        std::string cached_target_name = "object";
-                        if (self->model != NULL &&
-                            self->model->classes[self->detect_target] != NULL) {
-                            cached_target_name = self->model->classes[self->detect_target];
-                        }
-                        wake_word = "<detect>" + std::to_string(obj_cnt) + " " +
-                                    cached_target_name + " detected </detect>";
+                // HMB|TEC Persona Light V0.3.4: reine Erkennungsdiagnose.
+                // Jede positive SSCMA-Meldung wird unmittelbar ans Display
+                // weitergegeben (oben). Kein Dialogstart, keine Validierung.
+                // Damit pruefen wir zuerst unabhaengig die Kameraerkennung.
+                if (is_object_detected) {
+                    static int64_t last_positive_log_us = -5000000LL;
+                    if (cur_tm - last_positive_log_us >= 5000000LL) {
+                        last_positive_log_us = cur_tm;
+                        ESP_LOGI("PERSONA", "Person erkannt: score=%d target=%d",
+                                 persona_score, self->detect_target);
                     }
-                    printf("wake_word:%s\n", wake_word.c_str());
-                    // Application::GetInstance().WakeWordInvoke(wake_word);
-
-                    // 进入冷却状态，标记需要开始冷却期；如下变量将在会话结束后被使用，等待回调恢复后开始计时
-                    self->detection_state = SscmaCamera::COOLDOWN;
-                    self->need_start_cooldown = true;
                 }
             } break;
             case (640 + 480):
@@ -427,52 +341,65 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
             bool is_inference = false;
             int64_t last_keepalive_time = esp_timer_get_time();
             while (true) {
-                // Capture has priority; never change SSCMA mode during a photo.
+                // PTT photo capture has priority over SSCMA inference.
                 if (this_->capture_pending_.load()) {
                     vTaskDelay(pdMS_TO_TICKS(50));
                     continue;
                 }
-                std::lock_guard<std::mutex> command_lock(this_->sscma_command_mutex_);
-                if (this_->capture_pending_.load()) {
-                    continue;
-                }
-                if (this_->inference_restart_requested_.exchange(false)) {
-                    is_inference = false;
-                }
-                if (this_->sscma_restarted_) {
-                    ESP_LOGI(TAG, "SSCMA restarted detected");
-                    this_->sscma_restarted_ = false;
-                    is_inference = false;
-                }
-
-                if (esp_timer_get_time() - last_keepalive_time > 10 * 1000000) {
-                    last_keepalive_time = esp_timer_get_time();
-                    if (!__himax_keepalive_check(this_->sscma_client_handle_)) {
-                        ESP_LOGE(TAG, "restart himax");
-                        sscma_client_reset(this_->sscma_client_handle_);
-                        vTaskDelay(pdMS_TO_TICKS(100));
+                {
+                    std::lock_guard<std::mutex> lock(this_->sscma_command_mutex_);
+                    if (this_->capture_pending_.load()) {
+                        continue;
                     }
-                }
+                    if (this_->inference_restart_requested_.exchange(false) ||
+                        this_->sscma_restarted_) {
+                        this_->sscma_restarted_ = false;
+                        is_inference = false;
+                    }
 
-                if (this_->inference_en &&
-                    Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
-                    if (!is_inference) {
-                        ESP_LOGI(TAG, "Start inference (enable=1)");
+                    // Restore the original Watcher inference state machine.
+                    // Never send keepalive commands into an active inference stream.
+                    if (!is_inference &&
+                        esp_timer_get_time() - last_keepalive_time > 10000000LL) {
+                        last_keepalive_time = esp_timer_get_time();
+                        if (!__himax_keepalive_check(this_->sscma_client_handle_)) {
+                            ESP_LOGE(TAG, "Himax keepalive failed; resetting");
+                            sscma_client_reset(this_->sscma_client_handle_);
+                            this_->sscma_restarted_ = true;
+                        }
+                    }
+
+                    if (this_->inference_en &&
+                        Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+                        if (!is_inference) {
+                            HmbPersonaInferenceStatus(1, 0);
+                            ESP_LOGI(TAG, "PERSONA " HMB_PERSONA_VERSION ": Start inference");
+                            const esp_err_t br = sscma_client_break(this_->sscma_client_handle_);
+                            const esp_err_t mo = sscma_client_set_model(this_->sscma_client_handle_, 4);
+                            const esp_err_t se = sscma_client_set_sensor(this_->sscma_client_handle_, 1, 1, true);
+                            const esp_err_t iv = sscma_client_invoke(this_->sscma_client_handle_, -1, false, true);
+                            ESP_LOGW("PERSONA", "inference: break=%d model=%d sensor=%d invoke=%d", br, mo, se, iv);
+                            if (mo == ESP_OK && se == ESP_OK && iv == ESP_OK) {
+                                HmbPersonaInferenceStatus(2, 0);
+                                is_inference = true;
+                            } else {
+                                // Diagnose: 1xxxx=break, 2xxxx=model, 3xxxx=sensor, 4xxxx=invoke.
+                                // No automatic retry storm when SSCMA rejects a command.
+                                const int error_code = mo != ESP_OK ? 20000 + mo :
+                                                       se != ESP_OK ? 30000 + se :
+                                                       40000 + iv;
+                                HmbPersonaInferenceStatus(-1, error_code);
+                                vTaskDelay(pdMS_TO_TICKS(1000));
+                            }
+                        }
+                    } else if (is_inference) {
+                        HmbPersonaInferenceStatus(4, 0);
+                        ESP_LOGI(TAG, "PERSONA " HMB_PERSONA_VERSION ": Stop inference");
+                        is_inference = false;
                         sscma_client_break(this_->sscma_client_handle_);
-                        sscma_client_set_model(this_->sscma_client_handle_, 4);
-                        sscma_client_set_sensor(this_->sscma_client_handle_, 1, 1,
-                                                true);  // 设置分辨率 416X416
-                        sscma_client_invoke(this_->sscma_client_handle_, -1, false, true);
-                        is_inference = true;
                     }
-                } else if (is_inference &&
-                           (!this_->inference_en ||
-                            Application::GetInstance().GetDeviceState() != kDeviceStateIdle)) {
-                    ESP_LOGI(TAG, "Stop inference (enable=%d state=%d)", this_->inference_en,
-                             Application::GetInstance().GetDeviceState());
-                    is_inference = false;
-                    sscma_client_break(this_->sscma_client_handle_);
                 }
+                // Do not hold the command mutex during the idle delay.
                 vTaskDelay(pdMS_TO_TICKS(200));
             }
         },
@@ -514,7 +441,7 @@ void SscmaCamera::InitializeMcpTools() {
     detect_invoke_interval_sec = settings.GetInt("interval", 8);
     detect_duration_sec = settings.GetInt("duration", 2);
     detect_target = settings.GetInt("target", 0);
-    inference_en = 1;  // HMB Persona Light: automatische Personenerkennung aktiv
+    inference_en = 1;  // Persona Light: NVS-Altwert 0 ignorieren
     ESP_LOGW(TAG, "PERSONA inference_en=%d", inference_en);
 
     auto& mcp_server = McpServer::GetInstance();
