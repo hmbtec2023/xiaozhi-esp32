@@ -13,6 +13,8 @@
 #include "application.h"
 #include "sscma_client_commands.h"
 
+extern "C" void HmbPersonaCameraUpdate(int present, int score);
+
 #define TAG "SscmaCamera"
 
 #define IMG_JPEG_BUF_SIZE 48 * 1024
@@ -102,10 +104,13 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
             }
         }
 
+        ESP_LOGW("PERSONA", "SSCMA reply: resolution=%dx%d", width, height);
+
         switch ((width + height)) {
             case (416 + 416): {
                 bool is_object_detected = false;
                 bool is_need_wake = false;
+                int persona_score = 0;
 
                 // 定期更新检测配置参数，避免频繁NVS访问
                 int64_t cur_tm = esp_timer_get_time();
@@ -113,13 +118,35 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                 // 尝试获取检测框数据（目标检测模型）
                 if (sscma_utils_fetch_boxes_from_reply(reply, &boxes, &box_count) == ESP_OK &&
                     box_count > 0) {
+                    // HMB|TEC Persona Light V0.2.0: passive, rate-limited serial monitor.
+                    // Uses existing SSCMA replies; does not start a second inference.
+                    static int64_t persona_last_log_us = -5000000LL;
+                    const bool persona_log =
+                        (cur_tm - persona_last_log_us >= 5000000LL);
+                    if (persona_log) {
+                        persona_last_log_us = cur_tm;
+                        ESP_LOGI("PERSONA", "SSCMA boxes=%d frame=%dx%d", box_count, width, height);
+                    }
                     for (int i = 0; i < box_count; i++) {
+                        if (persona_log) {
+                            const int target = boxes[i].target;
+                            const char* label = "unknown";
+                            if (self->model != nullptr && target >= 0 &&
+                                target < self->model_class_cnt &&
+                                self->model->classes[target] != nullptr) {
+                                label = self->model->classes[target];
+                            }
+                            ESP_LOGI("PERSONA", "object=%d class=%s id=%d score=%d x=%d y=%d w=%d h=%d",
+                                     i, label, target, boxes[i].score,
+                                     boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h);
+                        }
                         ESP_LOGI(TAG, "[box %d]: x=%d, y=%d, w=%d, h=%d, score=%d, target=%d", i,
                                  boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h, boxes[i].score,
                                  boxes[i].target);
                         if (boxes[i].target == self->detect_target &&
                             boxes[i].score > self->detect_threshold) {
                             is_object_detected = true;
+                            persona_score = boxes[i].score;
                             model_type = 0;
                             obj_cnt++;
                             break;
@@ -158,6 +185,10 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                     }
                     free(points);
                 }
+
+                // HMB: nur vorhandene SSCMA-Frames; keine zweite Inferenz.
+                // 0/1 bedeutet Treffer fuer das konfigurierte Ziel, nicht Gesamtzahl.
+                HmbPersonaCameraUpdate(is_object_detected ? 1 : 0, persona_score);
 
                 // 如果需要开始冷却期，现在开始计时
                 if (self->need_start_cooldown) {  // 回调暂停，标志保持，等待回调恢复后开始计时
@@ -249,7 +280,7 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                                     cached_target_name + " detected </detect>";
                     }
                     printf("wake_word:%s\n", wake_word.c_str());
-                    Application::GetInstance().WakeWordInvoke(wake_word);
+                    // Application::GetInstance().WakeWordInvoke(wake_word);
 
                     // 进入冷却状态，标记需要开始冷却期；如下变量将在会话结束后被使用，等待回调恢复后开始计时
                     self->detection_state = SscmaCamera::COOLDOWN;
@@ -396,6 +427,18 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
             bool is_inference = false;
             int64_t last_keepalive_time = esp_timer_get_time();
             while (true) {
+                // Capture has priority; never change SSCMA mode during a photo.
+                if (this_->capture_pending_.load()) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
+                }
+                std::lock_guard<std::mutex> command_lock(this_->sscma_command_mutex_);
+                if (this_->capture_pending_.load()) {
+                    continue;
+                }
+                if (this_->inference_restart_requested_.exchange(false)) {
+                    is_inference = false;
+                }
                 if (this_->sscma_restarted_) {
                     ESP_LOGI(TAG, "SSCMA restarted detected");
                     this_->sscma_restarted_ = false;
@@ -471,7 +514,8 @@ void SscmaCamera::InitializeMcpTools() {
     detect_invoke_interval_sec = settings.GetInt("interval", 8);
     detect_duration_sec = settings.GetInt("duration", 2);
     detect_target = settings.GetInt("target", 0);
-    inference_en = settings.GetInt("enable", 0);
+    inference_en = 1;  // HMB Persona Light: automatische Personenerkennung aktiv
+    ESP_LOGW(TAG, "PERSONA inference_en=%d", inference_en);
 
     auto& mcp_server = McpServer::GetInstance();
     // 获取模型参数配置
@@ -569,6 +613,18 @@ void SscmaCamera::SetExplainUrl(const std::string& url, const std::string& token
 }
 
 bool SscmaCamera::Capture() {
+    // Block inference task while the sensor is switched to JPEG snapshot mode.
+    // Guard also clears the flag on every early return.
+    capture_pending_.store(true);
+    struct CaptureFlagGuard {
+        SscmaCamera* camera;
+        ~CaptureFlagGuard() {
+            camera->inference_restart_requested_.store(true);
+            camera->capture_pending_.store(false);
+        }
+    } capture_guard{this};
+    std::lock_guard<std::mutex> command_lock(sscma_command_mutex_);
+
     SscmaData data;
     int ret = 0;
 
@@ -577,6 +633,10 @@ bool SscmaCamera::Capture() {
         return false;
     }
 
+    // Stop continuous inference before switching the shared Himax sensor.
+    if (sscma_client_break(sscma_client_handle_) != ESP_OK) {
+        ESP_LOGW(TAG, "SSCMA break before capture failed; attempting snapshot");
+    }
     if (sscma_client_set_sensor(sscma_client_handle_, 1, 3, true)) {
         ESP_LOGE(TAG, "Failed to set sensor");
         return false;

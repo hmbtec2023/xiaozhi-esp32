@@ -30,10 +30,31 @@
 #include <esp_app_desc.h>
 
 #include "assets/lang_config.h"
+#include "led_strip.h"
+#include "freertos/task.h"
+#include <atomic>
+#include <cstdio>
+#include <esp_timer.h>
 
 #define TAG "sensecap_watcher"
 
+// HMB Persona V0.3.0: Kamera-Callback schreibt nur atomare Messwerte.
+// LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
+static std::atomic<int> hmb_persona_present{0};
+static std::atomic<int> hmb_persona_score{0};
+static std::atomic<int64_t> hmb_persona_last_us{0};
+
+extern "C" void HmbPersonaCameraUpdate(int present, int score) {
+    hmb_persona_present.store(present, std::memory_order_relaxed);
+    hmb_persona_score.store(score, std::memory_order_relaxed);
+    hmb_persona_last_us.store(esp_timer_get_time(), std::memory_order_release);
+}
+
+
 class CustomLcdDisplay : public SpiLcdDisplay {
+    private:
+        lv_obj_t* persona_label_ = nullptr;
+
     public:
         CustomLcdDisplay(esp_lcd_panel_io_handle_t io_handle, 
                         esp_lcd_panel_handle_t panel_handle,
@@ -99,6 +120,40 @@ class CustomLcdDisplay : public SpiLcdDisplay {
             // 针对圆形屏幕调整底部对话框位置，避免被圆角遮挡
             lv_obj_set_style_pad_bottom(bottom_bar_, 30, 0);
             lv_obj_set_width(chat_message_label_, LV_HOR_RES * 0.75); // 限制宽度，避免文字贴边
+
+
+            // HMB_PERSONA_V030: Live-Anzeige statt Versionsmeldung.
+            // Die erprobte Position und schwarze Schrift bleiben erhalten.
+            lv_obj_t* persona_screen = lv_obj_get_screen(bottom_bar_);
+            persona_label_ = lv_label_create(persona_screen);
+            lv_obj_set_width(persona_label_, lv_display_get_horizontal_resolution(nullptr) * 60 / 100);
+            lv_label_set_long_mode(persona_label_, LV_LABEL_LONG_WRAP);
+            lv_obj_set_style_text_align(persona_label_, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_color(persona_label_, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(persona_label_, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_pad_all(persona_label_, 0, 0);
+            lv_label_set_text(persona_label_, "PERSONA LIGHT\nKAMERA: WARTE...");
+            lv_obj_align(persona_label_, LV_ALIGN_CENTER, 0,
+                         lv_display_get_vertical_resolution(nullptr) * 15 / 100);
+            lv_obj_move_foreground(persona_label_);
+
+            lv_timer_create([](lv_timer_t* timer) {
+                lv_obj_t* label = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+                if (!label) return;
+                const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
+                const bool fresh = last != 0 && (esp_timer_get_time() - last) < 10000000LL;
+                char message[96];
+                if (!fresh) {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT\nKAMERA: WARTE...");
+                } else if (hmb_persona_present.load(std::memory_order_relaxed)) {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT\nPERSON ERKANNT\nSCORE: %d",
+                             hmb_persona_score.load(std::memory_order_relaxed));
+                } else {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT\nKEINE PERSON");
+                }
+                lv_label_set_text(label, message);
+            }, 500, persona_label_);
+
         }
 };
 
@@ -132,7 +187,16 @@ private:
             bool is_charging = (IoExpanderGetLevel(BSP_PWR_VBUS_IN_DET) == 0);
             if (is_charging) {
                 ESP_LOGI(TAG, "charging");
-                GetBacklight()->SetBrightness(0);
+                // Serialize with battery polling on the main task. USB may have
+                // disconnected by the time the request is handled.
+                Application::GetInstance().Schedule([this]() {
+                    power_save_timer_->SetEnabled(false);
+                    if (IoExpanderGetLevel(BSP_PWR_VBUS_IN_DET) == 0) {
+                        GetBacklight()->SetBrightness(0);
+                    } else {
+                        power_save_timer_->SetEnabled(true);
+                    }
+                });
             } else {
                 IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
             }
@@ -584,6 +648,35 @@ private:
     }
 
 public:
+    // HMB|TEC Persona Light: GPIO43 LED test; do not use GPIO47/48 (I2C).
+    static void PersonaLightTest(void*){
+        led_strip_config_t strip_config = {};
+        strip_config.strip_gpio_num = GPIO_NUM_43;
+        strip_config.max_leds = 1;
+        strip_config.led_model = LED_MODEL_WS2812;
+        strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+        led_strip_rmt_config_t rmt_config = {};
+        rmt_config.clk_src = RMT_CLK_SRC_DEFAULT;
+        rmt_config.resolution_hz = 10000000;
+        rmt_config.mem_block_symbols = 64;
+        led_strip_handle_t strip = nullptr;
+        esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &strip);
+        if(err != ESP_OK){
+            ESP_LOGE(TAG, "Persona Light: RMT init failed: %s", esp_err_to_name(err));
+            vTaskDelete(nullptr);
+            return;
+        }
+        const uint8_t colors[][3] = {{32,0,0},{0,32,0},{0,0,32},{0,0,0}};
+        ESP_LOGI(TAG, "Persona Light: GPIO43 test started");
+        while(true){
+            for(const auto &c : colors){
+                led_strip_set_pixel(strip, 0, c[0], c[1], c[2]);
+                led_strip_refresh(strip);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+    }
+
     SensecapWatcher() {
         ESP_LOGI(TAG, "Initialize Sensecap Watcher");
         InitializePowerSaveTimer();
@@ -596,6 +689,10 @@ public:
         Initializespd2010Display();
         GetBacklight()->RestoreBrightness();  // 对于不带摄像头的版本，InitializeCamera需要3s, 所以先恢复背光亮度
         InitializeCamera();
+        // Disable this task if GPIO43 is used by another device/console.
+        if(xTaskCreate(PersonaLightTest, "persona_light", 4096, nullptr, 2, nullptr) != pdPASS){
+            ESP_LOGE(TAG, "Persona Light: task creation failed");
+        }
     }
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -639,16 +736,14 @@ public:
         WifiBoard::SetPowerSaveLevel(level);
     }
 
-    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
-        static bool last_discharging = false;
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
         charging = (IoExpanderGetLevel(BSP_PWR_VBUS_IN_DET) == 0);
         discharging = !charging;
         level = (int)BatterygetPercent(false);
 
-        if (discharging != last_discharging) {
-            power_save_timer_->SetEnabled(discharging);
-            last_discharging = discharging;
-        }
+        // Always synchronize, including the first snapshot and a short USB
+        // connection observed only by the shutdown callback. Re-enabling is a no-op.
+        power_save_timer_->SetEnabled(discharging);
         if (level <= 1  &&  discharging) {
             ESP_LOGI(TAG, "Battery level is low, shutting down");
             IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);

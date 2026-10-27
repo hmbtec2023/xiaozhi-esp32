@@ -650,6 +650,10 @@ const std::string& AudioService::GetLastWakeWord() const {
     return audio_engine_ ? audio_engine_->GetLastDetectedWakeWord() : empty;
 }
 
+std::vector<std::string> AudioService::GetWakeWords() const {
+    return audio_engine_initialized_ ? audio_engine_->GetWakeWords() : std::vector<std::string>{};
+}
+
 std::unique_ptr<AudioStreamPacket> AudioService::PopWakeWordPacket() {
     auto packet = std::make_unique<AudioStreamPacket>();
     if (audio_engine_ && audio_engine_->GetWakeWordOpus(packet->payload)) {
@@ -690,11 +694,6 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
     }
-}
-
-void AudioService::RequestInputStop(){
-    ESP_LOGI(TAG,"HMB PTT-only: requesting microphone input stop");
-    xEventGroupSetBits(event_group_,AS_EVENT_AUDIO_INPUT_STOP_REQUEST);
 }
 
 void AudioService::ReleaseWakeWordResources() {
@@ -776,22 +775,9 @@ void AudioService::PlaySound(const std::string_view& ogg) {
     const auto* buf = reinterpret_cast<const uint8_t*>(ogg.data());
     size_t size = ogg.size();
 
-    uint32_t generation;
-    {
-        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-        generation = playback_generation_;
-    }
-
     auto demuxer = std::make_unique<OggDemuxer>();
     demuxer->OnPacket(
-        [this, generation](const uint8_t* data, int sample_rate, int frame_duration_ms, size_t size) {
-            {
-                std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-                if (generation != playback_generation_ || service_stopped_.load()) {
-                    return;
-                }
-            }
-
+        [this](const uint8_t* data, int sample_rate, int frame_duration_ms, size_t size) {
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->sample_rate = sample_rate;
             packet->frame_duration = frame_duration_ms;

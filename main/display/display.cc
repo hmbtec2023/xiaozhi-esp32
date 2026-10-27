@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include <utility>
 #include "application.h"
 #include "assets/lang_config.h"
 #include "audio_codec.h"
@@ -32,14 +31,10 @@ void Display::ShowNotification(const char* notification, int duration_ms) {
 
 void Display::UpdateStatusBar(bool update_all) {}
 
-void Display::SetEmotion(const char* emotion) {
+bool Display::SetEmotion(const char* emotion) {
+    // The base class has nothing to render with, so the emotion was never set.
     ESP_LOGW(TAG, "SetEmotion: %s", emotion);
-    if(emotion_callback_){
-        emotion_callback_(emotion);
-    }
-}
-void Display::SetEmotionCallback(std::function<void(const char*)> callback) {
-    emotion_callback_=std::move(callback);
+    return false;
 }
 
 void Display::SetChatMessage(const char* role, const char* content) {

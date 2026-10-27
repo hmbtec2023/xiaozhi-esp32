@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <memory>
 #include <thread>
+#include <atomic>
+#include <mutex>
 
 #include <esp_io_expander_tca95xx_16bit.h>
 #include <esp_jpeg_dec.h>
@@ -32,6 +34,10 @@ private:
     sscma_client_io_handle_t sscma_client_io_handle_;
     sscma_client_handle_t sscma_client_handle_;
     QueueHandle_t sscma_data_queue_;
+    // Serialize SSCMA commands between inference task and MCP photo capture.
+    std::mutex sscma_command_mutex_;
+    std::atomic<bool> capture_pending_{false};
+    std::atomic<bool> inference_restart_requested_{false};
     JpegData jpeg_data_;
     jpeg_dec_handle_t jpeg_dec_;
     jpeg_dec_io_t* jpeg_io_;
