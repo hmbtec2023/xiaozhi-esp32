@@ -10,6 +10,7 @@
 #include "power_save_timer.h"
 #include "sscma_camera.h"
 #include "persona_version.h"
+#include "mcp_server.h"
 #include "lvgl_theme.h"
 
 #include <esp_log.h>
@@ -35,6 +36,8 @@
 #include "freertos/task.h"
 #include <atomic>
 #include <cstdio>
+#include <string>
+#include <cJSON.h>
 #include <esp_timer.h>
 
 #define TAG "sensecap_watcher"
@@ -46,6 +49,11 @@ static std::atomic<int> hmb_persona_error{0};
 static std::atomic<int> hmb_persona_present{0};
 static std::atomic<int> hmb_persona_score{0};
 static std::atomic<int64_t> hmb_persona_last_us{0};
+static std::atomic<int> hmb_light_error{0}; // 1=URL/token,2=connect,3=upload/HTTP,4=other,5=JSON format,6=capture
+static std::atomic<int> hmb_light_status{0}; // 0=idle,1=capture,2=analyze,3=ok,4=error
+static std::atomic<int> hmb_light_r{0}, hmb_light_g{0}, hmb_light_b{0};
+static std::atomic<int> hmb_light_brightness{0}, hmb_light_dynamics{0};
+
 
 extern "C" void HmbPersonaInferenceStatus(int stage, int error) {
     hmb_persona_error.store(error, std::memory_order_relaxed);
@@ -151,7 +159,8 @@ class CustomLcdDisplay : public SpiLcdDisplay {
                 if (!label) return;
                 const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
                 const bool fresh = last != 0 && (esp_timer_get_time() - last) < 10000000LL;
-                char message[96];
+                char message[160];
+                const int light_status = hmb_light_status.load();
                 if (!fresh) {
                     const int stage = hmb_persona_stage.load(std::memory_order_acquire);
                     const int error = hmb_persona_error.load(std::memory_order_relaxed);
@@ -164,6 +173,17 @@ class CustomLcdDisplay : public SpiLcdDisplay {
                              hmb_persona_score.load(std::memory_order_relaxed));
                 } else {
                     snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\nKEINE PERSON");
+                }
+                if (light_status == 1 || light_status == 2) {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\n%s",
+                             light_status == 1 ? "FOTO..." : "MCP KI ANFRAGE...");
+                } else if (light_status == 3) {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION
+                             "\nRGB %d/%d/%d\nHELL %d DYN %d",
+                             hmb_light_r.load(), hmb_light_g.load(), hmb_light_b.load(),
+                             hmb_light_brightness.load(), hmb_light_dynamics.load());
+                } else if (light_status == 4) {
+                    snprintf(message, sizeof(message), "PERSONA LIGHT " HMB_PERSONA_VERSION "\nANALYSEFEHLER %d", hmb_light_error.load());
                 }
                 lv_label_set_text(label, message);
             }, 500, persona_label_);
@@ -691,6 +711,42 @@ public:
         }
     }
 
+    // HMB|TEC V0.3.16: Detection only triggers the existing XiaoZhi MCP flow.
+    // No Capture()/Explain() here: vision credentials belong to the server session.
+    static void SemanticLightTask(void* context) {
+        (void)context;
+        bool armed = true;
+        int64_t presence_since = 0;
+        int64_t absent_since = 0;
+        for (;;) {
+            const int64_t now = esp_timer_get_time();
+            const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
+            const bool fresh = last != 0 && now - last < 3000000LL;
+            const bool present = fresh && hmb_persona_present.load(std::memory_order_relaxed) != 0;
+            if (present) {
+                absent_since = 0;
+                if (!presence_since) presence_since = now;
+                if (armed && now - presence_since >= 2000000LL &&
+                    Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+                    armed = false;
+                    hmb_light_error.store(0);
+                    hmb_light_status.store(2);
+                    ESP_LOGI(TAG, "V0.3.16 PERSON CONFIRMED -> HMB_PERSONA_ANALYZE");
+                    Application::GetInstance().WakeWordInvoke("HMB_PERSONA_ANALYZE");
+                }
+            } else {
+                presence_since = 0;
+                if (!absent_since) absent_since = now;
+                if (!armed && now - absent_since >= 10000000LL) {
+                    armed = true;
+                    hmb_light_status.store(0);
+                    ESP_LOGI(TAG, "V0.3.16 rearmed after absence");
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    }
+
     SensecapWatcher() {
         ESP_LOGI(TAG, "Initialize Sensecap Watcher");
         InitializePowerSaveTimer();
@@ -703,6 +759,28 @@ public:
         Initializespd2010Display();
         GetBacklight()->RestoreBrightness();  // 对于不带摄像头的版本，InitializeCamera需要3s, 所以先恢复背光亮度
         InitializeCamera();
+        // As in HMB TalkCard: synthetic wake-word resolved through an MCP tool.
+        // The AI must subsequently call the existing self.camera.take_photo tool.
+        McpServer::GetInstance().AddTool(
+            "self.hmbtec.persona.analyze",
+            "When the received user input is exactly HMB_PERSONA_ANALYZE, call this tool first. "
+            "Then call self.camera.take_photo to inspect the current camera image. "
+            "Use visible image features only; do not infer emotion or identity. "
+            "Describe a suitable RGB light scene briefly in German. "
+            "Do not ask the user to speak and do not mention the trigger.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "V0.3.16 MCP persona.analyze invoked by assistant");
+                return std::string(
+                    "Analysiere JETZT das aktuelle Kamerabild mit self.camera.take_photo. "
+                    "Erzeuge aus ausschliesslich sichtbaren Merkmalen eine Lichtidee: "
+                    "RGB 0..255, Helligkeit 0..100, Dynamik 0..100. "
+                    "Keine Behauptungen ueber Emotionen oder Identitaet. "
+                    "Antworte kurz auf Deutsch. Keine Rueckfrage.");
+            });
+        if (xTaskCreate(SemanticLightTask, "semantic_light", 8192, this, 2, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "V0.3.16 semantic task creation failed");
+        }
         // Disable this task if GPIO43 is used by another device/console.
         if(xTaskCreate(PersonaLightTest, "persona_light", 4096, nullptr, 2, nullptr) != pdPASS){
             ESP_LOGE(TAG, "Persona Light: task creation failed");

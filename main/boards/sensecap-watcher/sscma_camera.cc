@@ -25,6 +25,8 @@ extern "C" void HmbPersonaInferenceStatus(int stage, int error);
 // Updated only by real 416x416 inference replies.
 static std::atomic<int64_t> g_persona_last_frame_us{0};
 
+// V0.3.16: Auto-chat removed. Only SemanticLightTask initiates XiaoZhi.
+
 static bool __himax_keepalive_check(sscma_client_handle_t client) {
     esp_err_t ret = ESP_OK;
     sscma_client_reply_t reply = {0};
@@ -187,7 +189,6 @@ SscmaCamera::SscmaCamera(esp_io_expander_handle_t io_exp_handle) {
                 // HMB: nur vorhandene SSCMA-Frames; keine zweite Inferenz.
                 // 0/1 bedeutet Treffer fuer das konfigurierte Ziel, nicht Gesamtzahl.
                 HmbPersonaCameraUpdate(is_object_detected ? 1 : 0, persona_score);
-
                 // HMB|TEC Persona Light V0.3.4: reine Erkennungsdiagnose.
                 // Jede positive SSCMA-Meldung wird unmittelbar ans Display
                 // weitergegeben (oben). Kein Dialogstart, keine Validierung.

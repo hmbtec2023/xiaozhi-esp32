@@ -1,0 +1,1 @@
+V0.3.15: Analysefehler-Code auf LCD. 1=URL/Token nicht gesetzt, 2=Verbindung, 3=Upload/HTTP, 4=sonstiger Explain-Fehler, 5=Antwort kein direktes Licht-JSON, 6=Capture. Nur zwei Dateien in main/boards/sensecap-watcher ersetzen. Nicht kompiliert.
