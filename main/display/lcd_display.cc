@@ -930,7 +930,9 @@ void LcdDisplay::SetupUI() {
 
     /* Middle layer: preview_image_ - centered display */
     preview_image_ = lv_image_create(screen);
-    lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
+    // Persona Light: preview uses the available round display area.
+    // Physical round panel clips the corners; do not alter camera capture.
+    lv_obj_set_size(preview_image_, width_, height_);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
@@ -1101,8 +1103,16 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // zoom factor 0.5
-        lv_image_set_scale(preview_image_, 128 * width_ / img_dsc->header.w);
+        // LVGL scale 256 = 100%. Enlarge preview without distortion.
+        // "Cover" the circular screen: edges may be clipped by the panel.
+        // Keep at least 94% of both display axes filled where possible.
+        const int32_t scale_w = (static_cast<int32_t>(width_) * 256 * 94) /
+                                (static_cast<int32_t>(img_dsc->header.w) * 100);
+        const int32_t scale_h = (static_cast<int32_t>(height_) * 256 * 94) /
+                                (static_cast<int32_t>(img_dsc->header.h) * 100);
+        const int32_t scale = (scale_w > scale_h) ? scale_w : scale_h;
+        lv_image_set_scale(preview_image_, scale > 0 ? scale : 256);
+        lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     }
 
     // Hide emoji_box_
