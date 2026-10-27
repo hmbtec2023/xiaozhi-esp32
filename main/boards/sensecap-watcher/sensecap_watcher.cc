@@ -42,7 +42,7 @@
 
 #define TAG "sensecap_watcher"
 
-// HMB Persona V0.3.0: Kamera-Callback schreibt nur atomare Messwerte.
+// HMB Persona V0.3.17: Kamera-Callback schreibt nur atomare Messwerte.
 // LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
 static std::atomic<int> hmb_persona_stage{0};
 static std::atomic<int> hmb_persona_error{0};
@@ -137,9 +137,11 @@ class CustomLcdDisplay : public SpiLcdDisplay {
             // 针对圆形屏幕调整底部对话框位置，避免被圆角遮挡
             lv_obj_set_style_pad_bottom(bottom_bar_, 30, 0);
             lv_obj_set_width(chat_message_label_, LV_HOR_RES * 0.75); // 限制宽度，避免文字贴边
+            // Persona Light: keine KI-Laufschrift auf dem Display.
+            lv_obj_add_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
 
 
-            // HMB_PERSONA_V030: Live-Anzeige statt Versionsmeldung.
+            // HMB_PERSONA_V0317: Live-Anzeige statt Versionsmeldung.
             // Die erprobte Position und schwarze Schrift bleiben erhalten.
             lv_obj_t* persona_screen = lv_obj_get_screen(bottom_bar_);
             persona_label_ = lv_label_create(persona_screen);
@@ -711,7 +713,7 @@ public:
         }
     }
 
-    // HMB|TEC V0.3.16: Detection only triggers the existing XiaoZhi MCP flow.
+    // HMB|TEC V0.3.17: Detection only triggers the existing XiaoZhi MCP flow.
     // No Capture()/Explain() here: vision credentials belong to the server session.
     static void SemanticLightTask(void* context) {
         (void)context;
@@ -731,7 +733,7 @@ public:
                     armed = false;
                     hmb_light_error.store(0);
                     hmb_light_status.store(2);
-                    ESP_LOGI(TAG, "V0.3.16 PERSON CONFIRMED -> HMB_PERSONA_ANALYZE");
+                    ESP_LOGI(TAG, "V0.3.17 PERSON CONFIRMED -> HMB_PERSONA_ANALYZE");
                     Application::GetInstance().WakeWordInvoke("HMB_PERSONA_ANALYZE");
                 }
             } else {
@@ -740,7 +742,7 @@ public:
                 if (!armed && now - absent_since >= 10000000LL) {
                     armed = true;
                     hmb_light_status.store(0);
-                    ESP_LOGI(TAG, "V0.3.16 rearmed after absence");
+                    ESP_LOGI(TAG, "V0.3.17 rearmed after absence");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -759,27 +761,58 @@ public:
         Initializespd2010Display();
         GetBacklight()->RestoreBrightness();  // 对于不带摄像头的版本，InitializeCamera需要3s, 所以先恢复背光亮度
         InitializeCamera();
-        // As in HMB TalkCard: synthetic wake-word resolved through an MCP tool.
-        // The AI must subsequently call the existing self.camera.take_photo tool.
+        // HMB|TEC V0.3.17: MCP-KI-Ausgabe als strukturierte Lichtszene.
+        // Der Server soll die Kamera zuerst aufrufen und danach set_light_scene.
         McpServer::GetInstance().AddTool(
             "self.hmbtec.persona.analyze",
             "When the received user input is exactly HMB_PERSONA_ANALYZE, call this tool first. "
-            "Then call self.camera.take_photo to inspect the current camera image. "
-            "Use visible image features only; do not infer emotion or identity. "
-            "Describe a suitable RGB light scene briefly in German. "
-            "Do not ask the user to speak and do not mention the trigger.",
+            "Then call self.camera.take_photo and analyze visible image features only. "
+            "Immediately call self.hmbtec.persona.set_light_scene with RGB (0..255), "
+            "brightness (0..255), dynamics (0..100), transition_ms (0..30000). "
+            "Do not infer identity or emotions. Do not produce spoken or written commentary.",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
-                ESP_LOGI(TAG, "V0.3.16 MCP persona.analyze invoked by assistant");
+                ESP_LOGI(TAG, "V0.3.17 MCP persona.analyze invoked");
                 return std::string(
-                    "Analysiere JETZT das aktuelle Kamerabild mit self.camera.take_photo. "
-                    "Erzeuge aus ausschliesslich sichtbaren Merkmalen eine Lichtidee: "
-                    "RGB 0..255, Helligkeit 0..100, Dynamik 0..100. "
-                    "Keine Behauptungen ueber Emotionen oder Identitaet. "
-                    "Antworte kurz auf Deutsch. Keine Rueckfrage.");
+                    "Rufe self.camera.take_photo auf. Waehle anhand sichtbarer Merkmale "
+                    "eine Lichtszene und uebergib sie SOFORT an "
+                    "self.hmbtec.persona.set_light_scene. "
+                    "Keine Emotionen oder Identitaeten ableiten. "
+                    "Keine Sprachausgabe und keine Textantwort erzeugen.");
+            });
+        McpServer::GetInstance().AddTool(
+            "self.hmbtec.persona.set_light_scene",
+            "Set a structured Persona Light scene after camera analysis. "
+            "Call this tool before any text response. "
+            "RGB and brightness 0..255, dynamics 0..100, transition_ms 0..30000. "
+            "No spoken response is required.",
+            PropertyList({
+                Property("red", kPropertyTypeInteger, 0, 0, 255),
+                Property("green", kPropertyTypeInteger, 0, 0, 255),
+                Property("blue", kPropertyTypeInteger, 0, 0, 255),
+                Property("brightness", kPropertyTypeInteger, 128, 0, 255),
+                Property("dynamics", kPropertyTypeInteger, 20, 0, 100),
+                Property("transition_ms", kPropertyTypeInteger, 2000, 0, 30000)
+            }),
+            [](const PropertyList& properties) -> ReturnValue {
+                const int r = properties["red"].value<int>();
+                const int g = properties["green"].value<int>();
+                const int b = properties["blue"].value<int>();
+                const int brightness = properties["brightness"].value<int>();
+                const int dynamics = properties["dynamics"].value<int>();
+                const int transition = properties["transition_ms"].value<int>();
+                hmb_light_r.store(r);
+                hmb_light_g.store(g);
+                hmb_light_b.store(b);
+                hmb_light_brightness.store(brightness);
+                hmb_light_dynamics.store(dynamics);
+                hmb_light_status.store(3);
+                ESP_LOGI(TAG, "V0.3.17 LIGHT_SCENE RGB=%d,%d,%d BRIGHT=%d DYN=%d TRANSITION=%dms",
+                         r, g, b, brightness, dynamics, transition);
+                return std::string("{\"ok\":true,\"scene_applied\":false,\"message\":\"Scene stored locally; Art-Net not enabled\"}");
             });
         if (xTaskCreate(SemanticLightTask, "semantic_light", 8192, this, 2, nullptr) != pdPASS) {
-            ESP_LOGE(TAG, "V0.3.16 semantic task creation failed");
+            ESP_LOGE(TAG, "V0.3.17 semantic task creation failed");
         }
         // Disable this task if GPIO43 is used by another device/console.
         if(xTaskCreate(PersonaLightTest, "persona_light", 4096, nullptr, 2, nullptr) != pdPASS){
@@ -801,6 +834,8 @@ public:
             AUDIO_CODEC_ES8311_ADDR, 
             AUDIO_CODEC_ES7243E_ADDR, 
             AUDIO_INPUT_REFERENCE);
+        // Akustische Ausgabe stumm; die MCP-Sitzung bleibt erhalten.
+        audio_codec.SetOutputVolume(0);
         return &audio_codec;
     }
 

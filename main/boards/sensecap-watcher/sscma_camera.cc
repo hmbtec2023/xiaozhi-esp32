@@ -25,7 +25,7 @@ extern "C" void HmbPersonaInferenceStatus(int stage, int error);
 // Updated only by real 416x416 inference replies.
 static std::atomic<int64_t> g_persona_last_frame_us{0};
 
-// V0.3.16: Auto-chat removed. Only SemanticLightTask initiates XiaoZhi.
+// V0.3.17: Auto-chat removed. Only SemanticLightTask initiates XiaoZhi.
 
 static bool __himax_keepalive_check(sscma_client_handle_t client) {
     esp_err_t ret = ESP_OK;

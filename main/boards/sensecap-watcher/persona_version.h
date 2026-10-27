@@ -1,2 +1,2 @@
 #pragma once
-#define HMB_PERSONA_VERSION "V0.3.16"
+#define HMB_PERSONA_VERSION "V0.3.17"
