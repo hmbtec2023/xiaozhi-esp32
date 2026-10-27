@@ -10,6 +10,7 @@
 #include "power_save_timer.h"
 #include "sscma_camera.h"
 #include "persona_version.h"
+extern "C" void HmbPersonaRequestFinish();
 #include "mcp_server.h"
 #include "lvgl_theme.h"
 
@@ -42,7 +43,7 @@
 
 #define TAG "sensecap_watcher"
 
-// HMB Persona V0.3.18: Kamera-Callback schreibt nur atomare Messwerte.
+// HMB Persona V0.3.21: Kamera-Callback schreibt nur atomare Messwerte.
 // LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
 static std::atomic<int> hmb_persona_stage{0};
 static std::atomic<int> hmb_persona_error{0};
@@ -51,6 +52,7 @@ static std::atomic<int> hmb_persona_score{0};
 static std::atomic<int64_t> hmb_persona_last_us{0};
 static std::atomic<int> hmb_light_error{0}; // 1=URL/token,2=connect,3=upload/HTTP,4=other,5=JSON format,6=capture
 static std::atomic<int> hmb_light_status{0}; // 0=idle,1=capture,2=analyze,3=ok,4=error
+static std::atomic<uint32_t> hmb_persona_finish_request{0}; // MCP scene received
 static std::atomic<int> hmb_light_r{0}, hmb_light_g{0}, hmb_light_b{0};
 static std::atomic<int> hmb_light_brightness{0}, hmb_light_dynamics{0};
 
@@ -159,7 +161,7 @@ class CustomLcdDisplay : public SpiLcdDisplay {
             lv_timer_create([](lv_timer_t* timer) {
                 lv_obj_t* label = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
                 if (!label) return;
-                const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
+            const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
                 const bool fresh = last != 0 && (esp_timer_get_time() - last) < 10000000LL;
                 char message[160];
                 const int light_status = hmb_light_status.load();
@@ -723,10 +725,60 @@ public:
     static void SemanticLightTask(void* context) {
         (void)context;
         bool armed = true;
+        uint32_t finish_handled = 0;
+        bool finish_speaking_sent = false;
+        bool finish_listening_sent = false;
+        bool finish_cycle_started = false;
+        int64_t finish_started_us = 0;
+        int64_t finish_last_action_us = 0;
         int64_t presence_since = 0;
         int64_t absent_since = 0;
         for (;;) {
             const int64_t now = esp_timer_get_time();
+            // Persona auto-finish: execute the SAME state-dependent operation as
+            // the physical button, but never toggle while IDLE (would open chat).
+            // Start only after the structured light scene has been received.
+            const uint32_t request = hmb_persona_finish_request.load(std::memory_order_acquire);
+            if (request != finish_handled) {
+                finish_handled = request;
+                // Duplicate MCP results must not restart a running finish cycle.
+                if (!finish_cycle_started && !armed) {
+                    finish_cycle_started = true;
+                    finish_speaking_sent = false;
+                    finish_listening_sent = false;
+                    finish_started_us = now;
+                    finish_last_action_us = 0;
+                    ESP_LOGI(TAG, "PERSONA FINISH: started, request=%lu", (unsigned long)request);
+                } else {
+                    ESP_LOGI(TAG, "PERSONA FINISH: duplicate/unsolicited scene, request=%lu", (unsigned long)request);
+                }
+            }
+            if (finish_started_us != 0) {
+                const auto state = Application::GetInstance().GetDeviceState();
+                // Allow MCP response to leave the server before interrupting TTS.
+                if (now - finish_started_us >= 1000000LL &&
+                    now - finish_started_us < 15000000LL &&
+                    (finish_last_action_us == 0 || now - finish_last_action_us >= 600000LL)) {
+                    if (state == kDeviceStateSpeaking && !finish_speaking_sent) {
+                        finish_speaking_sent = true;
+                        finish_last_action_us = now;
+                        ESP_LOGI(TAG, "PERSONA FINISH: abort speaking");
+                        HmbPersonaRequestFinish();
+                    } else if (state == kDeviceStateListening && !finish_listening_sent) {
+                        finish_listening_sent = true;
+                        finish_last_action_us = now;
+                        ESP_LOGI(TAG, "PERSONA FINISH: close listening channel");
+                        HmbPersonaRequestFinish();
+                    }
+                }
+                if (state == kDeviceStateIdle && now - finish_started_us >= 1000000LL) {
+                    ESP_LOGI(TAG, "PERSONA FINISH: idle reached");
+                    finish_started_us = 0;
+                } else if (now - finish_started_us >= 15000000LL) {
+                    ESP_LOGW(TAG, "PERSONA FINISH: timeout, no forced state change");
+                    finish_started_us = 0;
+                }
+            }
             const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
             const bool fresh = last != 0 && now - last < 3000000LL;
             const bool present = fresh && hmb_persona_present.load(std::memory_order_relaxed) != 0;
@@ -736,6 +788,7 @@ public:
                 if (armed && now - presence_since >= 2000000LL &&
                     Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
                     armed = false;
+                    finish_cycle_started = false;
                     hmb_light_error.store(0);
                     hmb_light_status.store(2);
                     ESP_LOGI(TAG, "V0.3.17 PERSON CONFIRMED -> HMB_PERSONA_ANALYZE");
@@ -743,11 +796,20 @@ public:
                 }
             } else {
                 presence_since = 0;
-                if (!absent_since) absent_since = now;
-                if (!armed && now - absent_since >= 10000000LL) {
-                    armed = true;
-                    hmb_light_status.store(0);
-                    ESP_LOGI(TAG, "V0.3.17 rearmed after absence");
+                // Paused inference / stale frames are NOT evidence of absence.
+                const bool confirmed_absent = fresh &&
+                    hmb_persona_present.load(std::memory_order_relaxed) == 0;
+                if (confirmed_absent &&
+                    Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+                    if (!absent_since) absent_since = now;
+                    if (!armed && now - absent_since >= 10000000LL) {
+                        armed = true;
+                        finish_cycle_started = false;
+                        hmb_light_status.store(0);
+                        ESP_LOGI(TAG, "PERSONA rearmed after confirmed absence");
+                    }
+                } else {
+                    absent_since = 0;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(200));
@@ -812,6 +874,7 @@ public:
                 hmb_light_brightness.store(brightness);
                 hmb_light_dynamics.store(dynamics);
                 hmb_light_status.store(3);
+                hmb_persona_finish_request.fetch_add(1, std::memory_order_release);
                 ESP_LOGI(TAG, "V0.3.17 LIGHT_SCENE RGB=%d,%d,%d BRIGHT=%d DYN=%d TRANSITION=%dms",
                          r, g, b, brightness, dynamics, transition);
                 return std::string("{\"ok\":true,\"scene_applied\":false,\"message\":\"Scene stored locally; Art-Net not enabled\"}");

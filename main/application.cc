@@ -1,3 +1,4 @@
+#include <atomic>
 #include "application.h"
 #include "assets.h"
 #include "assets/lang_config.h"
@@ -797,6 +798,13 @@ void Application::DismissAlert() {
     }
 }
 
+// HMB Persona: one-shot request; never open a new chat on an asynchronous race.
+static std::atomic<bool> hmb_persona_finish_toggle{false};
+extern "C" void HmbPersonaRequestFinish() {
+    hmb_persona_finish_toggle.store(true, std::memory_order_release);
+    Application::GetInstance().ToggleChatState();
+}
+
 void Application::ToggleChatState() { xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT); }
 
 void Application::StartListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING); }
@@ -804,6 +812,21 @@ void Application::StartListening() { xEventGroupSetBits(event_group_, MAIN_EVENT
 void Application::StopListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING); }
 
 void Application::HandleToggleChatEvent() {
+    if (hmb_persona_finish_toggle.exchange(false, std::memory_order_acq_rel)) {
+        const auto persona_state = GetDeviceState();
+        if (!protocol_) return;
+        if (persona_state == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "PERSONA: guarded abort speaking");
+            AbortSpeaking(kAbortReasonNone);
+        } else if (persona_state == kDeviceStateListening) {
+            ESP_LOGI(TAG, "PERSONA: guarded close listening");
+            protocol_->CloseAudioChannel();
+        } else {
+            ESP_LOGI(TAG, "PERSONA: finish ignored in state %d", (int)persona_state);
+        }
+        return;
+    }
+
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
