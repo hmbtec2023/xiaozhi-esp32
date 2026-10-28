@@ -5,6 +5,11 @@
 
 #include <driver/gpio.h>
 
+//--- HMB|TEC MemoryStand – LD2410 Radar
+#define LD2410_UART_RX GPIO_NUM_38 // grün -> LD2410 TX
+#define LD2410_UART_TX GPIO_NUM_39 // blau -> LD2410 RX 
+#define LD2410_UART_BAUD 256000
+
 #define AUDIO_INPUT_REFERENCE    true
 #define AUDIO_INPUT_SAMPLE_RATE  24000
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000

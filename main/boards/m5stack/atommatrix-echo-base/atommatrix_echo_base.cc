@@ -97,7 +97,7 @@ private:
             app.ToggleChatState();
         });
     }
-
+    
 public:
     AtomMatrixEchoBaseBoard() : face_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();

@@ -15,6 +15,8 @@
 #include <esp_lcd_gc9a01.h>
 #include <inttypes.h>
 
+#include <driver/uart.h> // for LD2410 Radar
+
 #define TAG "HMBTEC MemoryStand"
 
 
@@ -249,6 +251,39 @@ public:
         InitializeSpi();
         InitializeLcdDisplay(DetectLcdPanel());
         InitializeButtons();
+        // HMB|TEC MemoryStand – LD2410 UART
+        uart_config_t radar_uart = {};
+        radar_uart.baud_rate = LD2410_UART_BAUD;
+        radar_uart.data_bits = UART_DATA_8_BITS;
+        radar_uart.parity = UART_PARITY_DISABLE;
+        radar_uart.stop_bits = UART_STOP_BITS_1;
+        radar_uart.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+
+        ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &radar_uart));
+
+        ESP_ERROR_CHECK(uart_set_pin(
+            UART_NUM_1,
+            LD2410_UART_TX,
+            LD2410_UART_RX,
+            UART_PIN_NO_CHANGE,
+            UART_PIN_NO_CHANGE
+        ));
+
+        ESP_ERROR_CHECK(uart_driver_install(
+            UART_NUM_1, 2048, 0, 0, nullptr, 0
+        ));
+        // HMB|TEC MemoryStand – LD2410 Empfangstest
+        uint8_t radar_data[64];
+
+        int radar_len = uart_read_bytes(
+            UART_NUM_1,
+            radar_data,
+            sizeof(radar_data),
+            pdMS_TO_TICKS(500)
+        );
+        ESP_LOGI(TAG, "LD2410: %d Bytes empfangen", radar_len);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, radar_data, radar_len, ESP_LOG_INFO);
+
         GetBacklight()->RestoreBrightness();
     }
 
