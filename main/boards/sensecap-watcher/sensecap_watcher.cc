@@ -40,10 +40,16 @@ extern "C" void HmbPersonaRequestFinish();
 #include <string>
 #include <cJSON.h>
 #include <esp_timer.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include <lwip/sockets.h>
+#include <lwip/inet.h>
+#include <cerrno>
+#include <cstring>
 
 #define TAG "sensecap_watcher"
 
-// HMB Persona V0.3.21: Kamera-Callback schreibt nur atomare Messwerte.
+// HMB Persona V0.3.24: Kamera-Callback schreibt nur atomare Messwerte.
 // LVGL wird ausschliesslich durch den LVGL-Timer aktualisiert.
 static std::atomic<int> hmb_persona_stage{0};
 static std::atomic<int> hmb_persona_error{0};
@@ -55,6 +61,210 @@ static std::atomic<int> hmb_light_status{0}; // 0=idle,1=capture,2=analyze,3=ok,
 static std::atomic<uint32_t> hmb_persona_finish_request{0}; // MCP scene received
 static std::atomic<int> hmb_light_r{0}, hmb_light_g{0}, hmb_light_b{0};
 static std::atomic<int> hmb_light_brightness{0}, hmb_light_dynamics{0};
+
+// HMB|TEC Persona Art-Net V0.3.28 – dynamische Netzwerkerkennung
+#define HMB_ARTNET_DEBUG          1  // 1 = Status jede Sekunde, 0 = deaktiviert
+#define HMB_ARTNET_UNIVERSE       0
+#define HMB_ARTNET_FPS            20
+#define HMB_ARTNET_DMX_START      1  // DMX-Kanal 1 = Arrayindex 0
+// 0 = automatisch berechneter Subnetz-Broadcast; 1 = CC512-Unicast.
+#define HMB_ARTNET_USE_UNICAST    0
+#define HMB_ARTNET_UNICAST_IP     "0.0.0.0" // Bei Unicast CC512-IP eintragen.
+#define HMB_ARTNET_BROADCAST_IP   "255.255.255.255" // Nur Fallback ohne gueltige Netzmaske.
+#define HMB_ARTNET_DMX_LENGTH     512
+#define HMB_ARTNET_TEST_HOLD_MS    350  // je Kanal 350 ms
+#define HMB_ARTNET_TEST_ZERO_MS    500  // Nullrahmen vor/nach Test
+static std::atomic<int> hmb_light_transition{2000};
+static std::atomic<bool> hmb_artnet_scene_ready{false};
+static std::atomic<uint32_t> hmb_artnet_packets{0};
+static std::atomic<int> hmb_artnet_last_error{0};
+
+// Statuswerte werden vom Sender aktualisiert und von einem SEPARATEN Task ausgegeben.
+// So bleibt das Lebenszeichen sichtbar, selbst wenn der Sender nicht vorankommt.
+static std::atomic<uint32_t> hmb_artnet_loop_count{0};
+static std::atomic<bool> hmb_artnet_socket_ready{false};
+static std::atomic<uint32_t> hmb_artnet_destination{0}; // IPv4 in Netzwerk-Byteordnung
+
+static bool HmbArtNetNetwork(esp_netif_ip_info_t& ip, wifi_ap_record_t& ap) {
+    esp_netif_t* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta || esp_netif_get_ip_info(sta, &ip) != ESP_OK || ip.ip.addr == 0) return false;
+    return esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+}
+
+static uint32_t HmbArtNetDestination(const esp_netif_ip_info_t& ip) {
+#if HMB_ARTNET_USE_UNICAST
+    return inet_addr(HMB_ARTNET_UNICAST_IP);
+#else
+    // ip.addr und netmask.addr sind beide in Netzwerk-Byteordnung.
+    if (ip.netmask.addr == 0) return inet_addr(HMB_ARTNET_BROADCAST_IP);
+    return ip.ip.addr | ~ip.netmask.addr;
+#endif
+}
+
+static void HmbArtNetMonitorTask(void*) {
+#if HMB_ARTNET_DEBUG
+    uint32_t last_tx = 0;
+    uint32_t last_loop = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_netif_ip_info_t ip = {};
+        wifi_ap_record_t ap = {};
+        const bool wifi_ok = HmbArtNetNetwork(ip, ap);
+        const uint32_t tx = hmb_artnet_packets.load();
+        const uint32_t loops = hmb_artnet_loop_count.load();
+        const uint32_t dst_addr = hmb_artnet_destination.load();
+        esp_ip4_addr_t dst_ip = {}; dst_ip.addr = dst_addr;
+        ESP_LOGI(TAG, "PERSONA ARTNET LIVE: WIFI=%s SSID=%s IP=" IPSTR
+                 " MASK=" IPSTR " GW=" IPSTR " DEST=" IPSTR
+                 " RSSI=%d SOCKET=%s U=%d TX=%lu RATE=%lu/s LOOP=%lu (+%lu) ERR=%d",
+                 wifi_ok ? "OK" : "OFF", wifi_ok ? (const char*)ap.ssid : "-",
+                 IP2STR(&ip.ip), IP2STR(&ip.netmask), IP2STR(&ip.gw), IP2STR(&dst_ip),
+                 wifi_ok ? ap.rssi : 0,
+                 hmb_artnet_socket_ready.load() ? "READY" : "OFF", HMB_ARTNET_UNIVERSE,
+                 (unsigned long)tx, (unsigned long)(tx - last_tx),
+                 (unsigned long)loops, (unsigned long)(loops - last_loop),
+                 hmb_artnet_last_error.load());
+        last_tx = tx;
+        last_loop = loops;
+    }
+#else
+    vTaskDelete(nullptr);
+#endif
+}
+
+// Kontinuierlicher ArtDMX-Stream: Empfaenger-Fail-Safe bleibt versorgt.
+// Mapping: CH1=R, CH2=G, CH3=B, CH4=Brightness, CH5=Dynamics (0..100),
+// CH6=Transition in 100ms-Schritten (0..255).
+static void HmbArtNetTask(void*) {
+    ESP_LOGI(TAG, "PERSONA ARTNET: TASK GESTARTET U=%d MODE=%s",
+             HMB_ARTNET_UNIVERSE, HMB_ARTNET_USE_UNICAST ? "UNICAST" : "AUTO-BROADCAST");
+    int sock = -1;
+    uint32_t wifi_wait_count = 0;
+    uint32_t socket_fail_count = 0;
+    uint8_t sequence = 1;
+    int startup_phase = 0; // 0=Blackout, 1..6=Einzelkanal, 7=Blackout, 8=Normalbetrieb
+    int64_t phase_since_us = 0;
+    bool wifi_was_connected = false;
+    uint8_t packet[18 + HMB_ARTNET_DMX_LENGTH] = {};
+    memcpy(packet, "Art-Net", 7);
+    packet[7] = 0;
+    packet[8] = 0x00; packet[9] = 0x50;  // ArtDMX opcode, little endian
+    packet[10] = 0; packet[11] = 14;    // Protocol version, big endian
+    packet[13] = 0;                    // Physical
+    packet[14] = HMB_ARTNET_UNIVERSE & 0xFF;
+    packet[15] = (HMB_ARTNET_UNIVERSE >> 8) & 0x7F;
+    packet[16] = HMB_ARTNET_DMX_LENGTH >> 8;
+    packet[17] = HMB_ARTNET_DMX_LENGTH & 0xFF;
+    struct sockaddr_in dst = {};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(6454);
+    dst.sin_addr.s_addr = 0;
+    for (;;) {
+        hmb_artnet_loop_count.fetch_add(1);
+        wifi_ap_record_t ap = {};
+        esp_netif_ip_info_t ip = {};
+        const bool network_ready = HmbArtNetNetwork(ip, ap);
+        if (!network_ready) {
+            if (++wifi_wait_count % 10 == 0) {
+                ESP_LOGW(TAG, "PERSONA ARTNET: WLAN/IP wartet");
+            }
+            if (sock >= 0) { close(sock); sock = -1; }
+            hmb_artnet_socket_ready.store(false);
+            hmb_artnet_destination.store(0);
+            wifi_was_connected = false;
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+        wifi_wait_count = 0;
+        const uint32_t new_destination = HmbArtNetDestination(ip);
+        if (new_destination != hmb_artnet_destination.load()) {
+            dst.sin_addr.s_addr = new_destination;
+            hmb_artnet_destination.store(new_destination);
+            esp_ip4_addr_t target = {}; target.addr = new_destination;
+            ESP_LOGI(TAG, "PERSONA ARTNET: IP=" IPSTR " MASK=" IPSTR
+                     " ZIEL=" IPSTR ":6454", IP2STR(&ip.ip),
+                     IP2STR(&ip.netmask), IP2STR(&target));
+        }
+        if (!wifi_was_connected) {
+            wifi_was_connected = true;
+            startup_phase = 0;
+            phase_since_us = esp_timer_get_time();
+            ESP_LOGI(TAG, "PERSONA ARTNET: WLAN bereit; starte DMX-Nullsetzung und CH1..6-Test");
+        }
+        if (sock < 0) {
+            sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+            if (sock < 0) {
+                hmb_artnet_last_error.store(errno);
+                if (++socket_fail_count % 5 == 1) {
+                    ESP_LOGE(TAG, "PERSONA ARTNET: socket() fehlgeschlagen errno=%d", errno);
+                }
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            int enabled = 1;
+            if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled)) < 0) {
+                ESP_LOGE(TAG, "PERSONA ARTNET: SO_BROADCAST fehlgeschlagen errno=%d", errno);
+                hmb_artnet_last_error.store(errno);
+                close(sock); sock = -1;
+                hmb_artnet_socket_ready.store(false);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            hmb_artnet_socket_ready.store(true);
+            ESP_LOGI(TAG, "PERSONA ARTNET: UDP Socket bereit, U=%d", HMB_ARTNET_UNIVERSE);
+        }
+        memset(packet + 18, 0, HMB_ARTNET_DMX_LENGTH);
+        const int start = HMB_ARTNET_DMX_START - 1;
+        const int64_t now_us = esp_timer_get_time();
+        if (startup_phase < 8) {
+            const int64_t hold_us = (startup_phase == 0 || startup_phase == 7)
+                ? HMB_ARTNET_TEST_ZERO_MS * 1000LL : HMB_ARTNET_TEST_HOLD_MS * 1000LL;
+            if (now_us - phase_since_us >= hold_us) {
+                ++startup_phase;
+                phase_since_us = now_us;
+                if (startup_phase <= 6) {
+                    ESP_LOGI(TAG, "PERSONA ARTNET TEST: CH%d = 255 (alle anderen = 0)", startup_phase);
+                } else if (startup_phase == 7) {
+                    ESP_LOGI(TAG, "PERSONA ARTNET TEST: alle 512 DMX-Kanaele = 0");
+                } else {
+                    ESP_LOGI(TAG, "PERSONA ARTNET TEST: abgeschlossen, Normalbetrieb");
+                }
+            }
+            if (startup_phase >= 1 && startup_phase <= 6 &&
+                start >= 0 && start + startup_phase - 1 < HMB_ARTNET_DMX_LENGTH) {
+                packet[18 + start + startup_phase - 1] = 255;
+            }
+        } else if (hmb_artnet_scene_ready.load(std::memory_order_acquire) &&
+                   start >= 0 && start + 5 < HMB_ARTNET_DMX_LENGTH) {
+            packet[18 + start + 0] = static_cast<uint8_t>(hmb_light_r.load());
+            packet[18 + start + 1] = static_cast<uint8_t>(hmb_light_g.load());
+            packet[18 + start + 2] = static_cast<uint8_t>(hmb_light_b.load());
+            packet[18 + start + 3] = static_cast<uint8_t>(hmb_light_brightness.load());
+            packet[18 + start + 4] = static_cast<uint8_t>(hmb_light_dynamics.load());
+            int transition_units = hmb_light_transition.load() / 100;
+            if (transition_units > 255) transition_units = 255;
+            packet[18 + start + 5] = static_cast<uint8_t>(transition_units);
+        }
+        packet[12] = sequence++;
+        if (sequence == 0) sequence = 1;
+        const int sent = sendto(sock, packet, sizeof(packet), 0,
+                                reinterpret_cast<const sockaddr*>(&dst), sizeof(dst));
+        if (sent != sizeof(packet)) {
+            hmb_artnet_last_error.store(errno);
+            ESP_LOGW(TAG, "PERSONA ARTNET: sendto failed errno=%d", errno);
+            close(sock); sock = -1;
+            hmb_artnet_socket_ready.store(false);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+        const uint32_t count = hmb_artnet_packets.fetch_add(1) + 1;
+        if (count == 1) {
+            ESP_LOGI(TAG, "PERSONA ARTNET: ERSTES PAKET GESENDET (%d Bytes)", sent);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000 / HMB_ARTNET_FPS));
+    }
+}
+
 
 
 extern "C" void HmbPersonaInferenceStatus(int stage, int error) {
@@ -691,35 +901,6 @@ private:
     }
 
 public:
-    // HMB|TEC Persona Light: GPIO43 LED test; do not use GPIO47/48 (I2C).
-    static void PersonaLightTest(void*){
-        led_strip_config_t strip_config = {};
-        strip_config.strip_gpio_num = GPIO_NUM_43;
-        strip_config.max_leds = 1;
-        strip_config.led_model = LED_MODEL_WS2812;
-        strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
-        led_strip_rmt_config_t rmt_config = {};
-        rmt_config.clk_src = RMT_CLK_SRC_DEFAULT;
-        rmt_config.resolution_hz = 10000000;
-        rmt_config.mem_block_symbols = 64;
-        led_strip_handle_t strip = nullptr;
-        esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &strip);
-        if(err != ESP_OK){
-            ESP_LOGE(TAG, "Persona Light: RMT init failed: %s", esp_err_to_name(err));
-            vTaskDelete(nullptr);
-            return;
-        }
-        const uint8_t colors[][3] = {{32,0,0},{0,32,0},{0,0,32},{0,0,0}};
-        ESP_LOGI(TAG, "Persona Light: GPIO43 test started");
-        while(true){
-            for(const auto &c : colors){
-                led_strip_set_pixel(strip, 0, c[0], c[1], c[2]);
-                led_strip_refresh(strip);
-                vTaskDelay(pdMS_TO_TICKS(1000));
-            }
-        }
-    }
-
     // HMB|TEC V0.3.17: Detection only triggers the existing XiaoZhi MCP flow.
     // No Capture()/Explain() here: vision credentials belong to the server session.
     static void SemanticLightTask(void* context) {
@@ -732,7 +913,10 @@ public:
         int64_t finish_started_us = 0;
         int64_t finish_last_action_us = 0;
         int64_t presence_since = 0;
-        int64_t absent_since = 0;
+        int64_t next_analysis_us = 0;
+        bool waiting_for_completion = false;
+        bool cooldown_started = false;
+        constexpr int64_t PERSONA_REPEAT_US = 10000000LL;
         for (;;) {
             const int64_t now = esp_timer_get_time();
             // Persona auto-finish: execute the SAME state-dependent operation as
@@ -782,35 +966,49 @@ public:
             const int64_t last = hmb_persona_last_us.load(std::memory_order_acquire);
             const bool fresh = last != 0 && now - last < 3000000LL;
             const bool present = fresh && hmb_persona_present.load(std::memory_order_relaxed) != 0;
+            // Abschluss einer KI-Runde:
+            // Erst nach Rueckkehr in IDLE beginnt die 10-s-Pause.
+            if (waiting_for_completion &&
+                finish_cycle_started &&
+                finish_started_us == 0 &&
+                Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+                waiting_for_completion = false;
+                cooldown_started = true;
+                next_analysis_us = now + PERSONA_REPEAT_US;
+                ESP_LOGI(TAG, "PERSONA V0.3.29: KI-Runde beendet; Pause 10 s");
+            }
+
+            if (cooldown_started && now >= next_analysis_us) {
+                cooldown_started = false;
+                armed = true;
+                ESP_LOGI(TAG, "PERSONA V0.3.29: Wieder bereit fuer Analyse");
+            }
+
             if (present) {
-                absent_since = 0;
                 if (!presence_since) presence_since = now;
-                if (armed && now - presence_since >= 2000000LL &&
+
+                if (armed &&
+                    !waiting_for_completion &&
+                    !cooldown_started &&
+                    now - presence_since >= 2000000LL &&
                     Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+
                     armed = false;
+                    waiting_for_completion = true;
                     finish_cycle_started = false;
+                    finish_started_us = 0;
+
                     hmb_light_error.store(0);
                     hmb_light_status.store(2);
-                    ESP_LOGI(TAG, "V0.3.17 PERSON CONFIRMED -> HMB_PERSONA_ANALYZE");
-                    Application::GetInstance().WakeWordInvoke("HMB_PERSONA_ANALYZE");
+
+                    ESP_LOGI(TAG,
+                             "PERSONA V0.3.29: Person erkannt -> neue KI-Analyse");
+
+                    Application::GetInstance().WakeWordInvoke(
+                        "HMB_PERSONA_ANALYZE");
                 }
             } else {
                 presence_since = 0;
-                // Paused inference / stale frames are NOT evidence of absence.
-                const bool confirmed_absent = fresh &&
-                    hmb_persona_present.load(std::memory_order_relaxed) == 0;
-                if (confirmed_absent &&
-                    Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
-                    if (!absent_since) absent_since = now;
-                    if (!armed && now - absent_since >= 10000000LL) {
-                        armed = true;
-                        finish_cycle_started = false;
-                        hmb_light_status.store(0);
-                        ESP_LOGI(TAG, "PERSONA rearmed after confirmed absence");
-                    }
-                } else {
-                    absent_since = 0;
-                }
             }
             vTaskDelay(pdMS_TO_TICKS(200));
         }
@@ -873,19 +1071,27 @@ public:
                 hmb_light_b.store(b);
                 hmb_light_brightness.store(brightness);
                 hmb_light_dynamics.store(dynamics);
+                hmb_light_transition.store(transition);
+                hmb_artnet_scene_ready.store(true, std::memory_order_release);
                 hmb_light_status.store(3);
                 hmb_persona_finish_request.fetch_add(1, std::memory_order_release);
                 ESP_LOGI(TAG, "V0.3.17 LIGHT_SCENE RGB=%d,%d,%d BRIGHT=%d DYN=%d TRANSITION=%dms",
                          r, g, b, brightness, dynamics, transition);
-                return std::string("{\"ok\":true,\"scene_applied\":false,\"message\":\"Scene stored locally; Art-Net not enabled\"}");
+                return std::string("{\"ok\":true,\"scene_applied\":true,\"message\":\"Scene queued for Art-Net broadcast (requires connected Wi-Fi)\"}");
             });
+        if (xTaskCreate(HmbArtNetMonitorTask, "artnet_monitor", 4096, nullptr, 2, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "PERSONA ARTNET: monitor task creation failed");
+        }
+        if (xTaskCreate(HmbArtNetTask, "hmb_artnet", 4096, nullptr, 2, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "PERSONA ARTNET: task creation failed");
+        } else {
+            ESP_LOGI(TAG, "PERSONA ARTNET: FreeRTOS Task angelegt");
+        }
         if (xTaskCreate(SemanticLightTask, "semantic_light", 8192, this, 2, nullptr) != pdPASS) {
             ESP_LOGE(TAG, "V0.3.17 semantic task creation failed");
         }
         // Disable this task if GPIO43 is used by another device/console.
-        if(xTaskCreate(PersonaLightTest, "persona_light", 4096, nullptr, 2, nullptr) != pdPASS){
-            ESP_LOGE(TAG, "Persona Light: task creation failed");
-        }
+
     }
 
     virtual AudioCodec* GetAudioCodec() override {
