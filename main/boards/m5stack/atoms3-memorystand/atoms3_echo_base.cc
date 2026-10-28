@@ -16,9 +16,90 @@
 #include <inttypes.h>
 
 #include <driver/uart.h> // for LD2410 Radar
+#include <cstring>  // memcmp(), memmove()
 
 #define TAG "HMBTEC MemoryStand"
 
+// HMB|TEC MemoryStand – LD2410 Stream-Parser
+static void Ld2410Task(void* arg) {
+    constexpr uint8_t HEADER[] = {0xF4, 0xF3, 0xF2, 0xF1};
+    constexpr uint8_t FOOTER[] = {0xF8, 0xF7, 0xF6, 0xF5};
+
+    uint8_t buffer[128] = {};
+    uint8_t rx[64];
+    size_t used = 0;
+    int last_presence = -1;
+
+    while (true) {
+        int len = uart_read_bytes(
+            UART_NUM_1, rx, sizeof(rx), pdMS_TO_TICKS(200)
+        );
+
+        for (int i = 0; i < len; ++i) {
+            if (used >= sizeof(buffer)) {
+                memmove(buffer, buffer + 1, --used);
+            }
+
+            buffer[used++] = rx[i];
+
+            while (used >= 4) {
+                if (memcmp(buffer, HEADER, 4) != 0) {
+                    memmove(buffer, buffer + 1, --used);
+                    continue;
+                }
+
+                if (used < 6) break;
+
+                uint16_t n = buffer[4] | (buffer[5] << 8);
+
+                if (n < 4 || n > 96) {
+                    memmove(buffer, buffer + 1, --used);
+                    continue;
+                }
+
+                size_t total = 6 + n + 4;
+                if (used < total) break;
+
+                if (memcmp(buffer + 6 + n, FOOTER, 4) == 0 &&
+                    n >= 13 &&
+                    buffer[6] == 0x02 &&
+                    buffer[7] == 0xAA &&
+                    buffer[6 + n - 2] == 0x55 &&
+                    buffer[6 + n - 1] == 0x00) {
+
+                    uint8_t state = buffer[8];
+
+                    if (state <= 3) {
+                        bool presence = state != 0;
+
+                        uint16_t moving_cm =
+                            buffer[9] | (buffer[10] << 8);
+                        uint8_t moving_energy = buffer[11];
+
+                        uint16_t still_cm =
+                            buffer[12] | (buffer[13] << 8);
+                        uint8_t still_energy = buffer[14];
+
+                        if (static_cast<int>(presence) != last_presence) {
+                            last_presence = presence;
+
+                            ESP_LOGI(TAG,
+                                "LD2410 PRESENCE=%s STATE=%u "
+                                "MOVE=%ucm/%u STATIC=%ucm/%u",
+                                presence ? "YES" : "NO",
+                                state,
+                                moving_cm, moving_energy,
+                                still_cm, still_energy);
+                        }
+                    }
+                }
+
+                memmove(buffer, buffer + total, used - total);
+                used -= total;
+            }
+        }
+    }
+}
 
 static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
     //  {cmd, { data }, data_size, delay_ms}
@@ -272,18 +353,19 @@ public:
         ESP_ERROR_CHECK(uart_driver_install(
             UART_NUM_1, 2048, 0, 0, nullptr, 0
         ));
-        // HMB|TEC MemoryStand – LD2410 Empfangstest
-        uint8_t radar_data[64];
 
-        int radar_len = uart_read_bytes(
-            UART_NUM_1,
-            radar_data,
-            sizeof(radar_data),
-            pdMS_TO_TICKS(500)
+        // LD2410-Empfangstask starten
+        BaseType_t task_ok = xTaskCreate(
+            Ld2410Task,
+            "LD2410",
+            3072,
+            nullptr,
+            5,
+            nullptr
         );
-        ESP_LOGI(TAG, "LD2410: %d Bytes empfangen", radar_len);
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, radar_data, radar_len, ESP_LOG_INFO);
-
+        ESP_LOGI(TAG, "LD2410 Task: %s",
+                task_ok == pdPASS ? "STARTED" : "FAILED");
+                
         GetBacklight()->RestoreBrightness();
     }
 
