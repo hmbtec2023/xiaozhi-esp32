@@ -342,6 +342,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_M5STACK_ATOM_S3_ECHO_BASE
         bool "M5Stack AtomS3 + Echo Base"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_M5STACK_ATOM_S3_MEMORYSTAND
+        bool "HMBTEC MemoryStand (AtomS3)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE
         bool "M5Stack AtomS3R + Echo Base"
         depends on IDF_TARGET_ESP32S3
