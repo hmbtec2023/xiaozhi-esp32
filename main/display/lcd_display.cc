@@ -18,6 +18,12 @@
 
 #include "board.h"
 
+#if CONFIG_BOARD_TYPE_M5STACK_ATOM_S3_MEMORYSTAND
+extern "C" {
+    extern volatile uint8_t radar_display_state;
+}
+#endif
+
 #define TAG "LcdDisplay"
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -1064,6 +1070,44 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+
+    #if CONFIG_BOARD_TYPE_M5STACK_ATOM_S3_MEMORYSTAND
+    // HMB|TEC MemoryStand: Anzeige des bestaetigten Radar-Zustands.
+    // Die Radar-Task schreibt nur radar_display_state; LVGL bleibt im UI-Thread.
+    lv_obj_t* radar_label = lv_label_create(screen);
+    lv_label_set_text(radar_label, "RADAR: ABSENT");
+    lv_obj_set_style_text_color(radar_label, lv_color_hex(0x0055CC), 0);
+    lv_obj_add_flag(radar_label, LV_OBJ_FLAG_HIDDEN);
+
+    // XiaoZhi baut seine UI beim Start um: deshalb erst nach 12 s auf Top-Layer.
+    lv_timer_create(
+        [](lv_timer_t* timer) {
+            auto* label = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+            lv_obj_set_parent(label, lv_layer_top());
+            lv_obj_center(label);
+            lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+            ESP_LOGI("HMBTEC_RADAR", "Radar-Anzeige aktiviert");
+            lv_timer_delete(timer);
+        }, 12000, radar_label);
+
+    lv_timer_create(
+        [](lv_timer_t* timer) {
+            auto* label = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+            const uint8_t state = radar_display_state;
+            const char* text =
+                state == 0 ? "RADAR: ABSENT" :
+                state == 1 ? "RADAR: PRESENT" :
+                state == 2 ? "RADAR: NEAR" :
+                state == 3 ? "RADAR: DIALOG" :
+                state == 4 ? "RADAR: LEFT" : "RADAR: ERROR";
+            // Pro Label eigener Cache; keine 200-ms-Logflut.
+            const char* current = lv_label_get_text(label);
+            if (strcmp(current, text) != 0) {
+                lv_label_set_text(label, text);
+                ESP_LOGI("HMBTEC_RADAR", "Display-State=%u (%s)", state, text);
+            }
+        }, 200, radar_label);
+    #endif
 }
 
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
