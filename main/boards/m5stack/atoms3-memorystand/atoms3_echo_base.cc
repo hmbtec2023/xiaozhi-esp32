@@ -21,11 +21,15 @@
 #include "ir_remote_controller.h"
 #include <cstring>  // memcmp(), memmove()
 #include <lvgl.h>
+#include "mcp_server.h"
 
 #define TAG "HMBTEC MemoryStand"
+//-------------------------------------------------------------
+#define HMB_RADAR_DEFAULT_ENABLED  0  // 1 = EIN, 0 = AUS
+//-------------------------------------------------------------
 
 // HMB|TEC Firmware-Version (bei jeder Aenderung hochzaehlen)
-#define HMB_FIRMWARE_VERSION "0.4.6"
+#define HMB_FIRMWARE_VERSION "0.5.4"
 
 #include <led_strip.h>
 
@@ -46,82 +50,86 @@ static constexpr uint16_t NEAR_DISTANCE_CM = 100;
 // Adresse und Kommandos gemaess Vorgabe; Kompatibilitaet mit Leuchte pruefen.
 #define HMB_IR_ENABLED 1
 #define HMB_IR_RX_ENABLED 1
-static constexpr gpio_num_t IR_RX_GPIO = GPIO_NUM_2; // Externer IR-Demodulator, Pinbelegung pruefen
-static constexpr gpio_num_t IR_TX_GPIO = GPIO_NUM_4; // M5Stack ATOM S3 integrierte IR-LED
-static constexpr uint16_t IR_NEC_ADDRESS = 0x0000; // 0xEF00; // Extended NEC, 16-Bit-Adresse
-static constexpr uint8_t IR_NEC_BLUE    = 0x11;
-static constexpr uint8_t IR_NEC_GREEN   = 0x1B;
+static constexpr gpio_num_t IR_RX_GPIO    = GPIO_NUM_2; // Externer IR-Demodulator, Pinbelegung pruefen
+static constexpr gpio_num_t IR_TX_GPIO    = GPIO_NUM_4; // M5Stack ATOM S3 integrierte IR-LED
+static constexpr uint16_t IR_NEC_ADDRESS  = 0x0000; // 0xEF00; // Extended NEC, 16-Bit-Adresse
+static constexpr uint8_t IR_NEC_RED       = 0x19;
+static constexpr uint8_t IR_NEC_RED_1     = 0x17;
+static constexpr uint8_t IR_NEC_RED_2     = 0x0A;
+
+static constexpr uint8_t IR_NEC_BLUE      = 0x11;
+static constexpr uint8_t IR_NEC_BLUE_1    = 0x16;
+static constexpr uint8_t IR_NEC_BLUE_2    = 0x04;
+static constexpr uint8_t IR_NEC_BLUE_3    = 0x0E;
+
+static constexpr uint8_t IR_NEC_GREEN     = 0x1B;
+static constexpr uint8_t IR_NEC_GREEN_1   = 0x12;
+static constexpr uint8_t IR_NEC_GREEN_2   = 0x4C;
+static constexpr uint8_t IR_NEC_GREEN_3   = 0x1E;
+
 static constexpr uint8_t IR_NEC_CYAN    = 0x14;
 static constexpr uint8_t IR_NEC_PURPLE  = 0x0F;
-static constexpr uint8_t IR_NEC_ORANGE  = 0x1B;
+static constexpr uint8_t IR_NEC_ORANGE  = 0x40;
 
-static constexpr uint8_t IR_NEC_OFF  = 0x1F;
-static constexpr uint8_t IR_NEC_ON  = 0x0D;
+static constexpr uint8_t IR_NEC_YELLOW  = 0x1C;
+static constexpr uint8_t IR_NEC_WEISS   = 0x15;
+
+static constexpr uint8_t IR_NEC_OFF     = 0x1F;
+static constexpr uint8_t IR_NEC_ON      = 0x0D;
+static constexpr uint8_t IR_NEC_FLASH   = 0x4D;
+static constexpr uint8_t IR_NEC_STROBE  = 0x00;
+static constexpr uint8_t IR_NEC_FADE    = 0x1A;
 static constexpr uint8_t IR_NEC_SMOOTH  = 0x0C;
 
 static rmt_channel_handle_t ir_tx_channel = nullptr;
 static rmt_encoder_handle_t ir_copy_encoder = nullptr;
 
+// Zuletzt per IR-Fernbedienung gewählte Farbe
+static uint8_t ir_selected_color = IR_NEC_WEISS;
+
 static void InitializeIrTransmitter() {
-#if HMB_IR_ENABLED
-    rmt_tx_channel_config_t tx_config = {};
-    tx_config.gpio_num = IR_TX_GPIO;
-    tx_config.clk_src = RMT_CLK_SRC_DEFAULT;
-    tx_config.resolution_hz = 1000000; // 1 Tick = 1 us
-    tx_config.mem_block_symbols = 64;
-    tx_config.trans_queue_depth = 4;
-    esp_err_t err = rmt_new_tx_channel(&tx_config, &ir_tx_channel);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "IR RMT TX: %s", esp_err_to_name(err)); return; }
+    #if HMB_IR_ENABLED
+        rmt_tx_channel_config_t tx_config = {};
+        tx_config.gpio_num = IR_TX_GPIO;
+        tx_config.clk_src = RMT_CLK_SRC_DEFAULT;
+        tx_config.resolution_hz = 1000000; // 1 Tick = 1 us
+        tx_config.mem_block_symbols = 64;
+        tx_config.trans_queue_depth = 4;
+        esp_err_t err = rmt_new_tx_channel(&tx_config, &ir_tx_channel);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "IR RMT TX: %s", esp_err_to_name(err)); return; }
 
-    rmt_carrier_config_t carrier = {};
-    carrier.frequency_hz = 38000;
-    carrier.duty_cycle = 0.33f;
-    carrier.flags.polarity_active_low = false;
-    err = rmt_apply_carrier(ir_tx_channel, &carrier);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "IR carrier: %s", esp_err_to_name(err)); return; }
+        rmt_carrier_config_t carrier = {};
+        carrier.frequency_hz = 38000;
+        carrier.duty_cycle = 0.33f;
+        carrier.flags.polarity_active_low = false;
+        err = rmt_apply_carrier(ir_tx_channel, &carrier);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "IR carrier: %s", esp_err_to_name(err)); return; }
 
-    rmt_copy_encoder_config_t encoder_config = {};
-    err = rmt_new_copy_encoder(&encoder_config, &ir_copy_encoder);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "IR encoder: %s", esp_err_to_name(err)); return; }
-    err = rmt_enable(ir_tx_channel);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "IR enable: %s", esp_err_to_name(err)); return; }
-    ESP_LOGI(TAG, "IR Extended NEC GPIO4 / 38kHz bereit");
-#endif
+        rmt_copy_encoder_config_t encoder_config = {};
+        err = rmt_new_copy_encoder(&encoder_config, &ir_copy_encoder);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "IR encoder: %s", esp_err_to_name(err)); return; }
+        err = rmt_enable(ir_tx_channel);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "IR enable: %s", esp_err_to_name(err)); return; }
+        ESP_LOGI(TAG, "IR Extended NEC GPIO4 / 38kHz bereit");
+    #endif
 }
 
-static void SendIrStatus(uint8_t state) {
+// ============================================================
+// Universeller IR-NEC-Sender
+// GPIO4 / 38 kHz / Adresse 0x0000
+// ============================================================
+
+static void SendIrCommand(uint8_t command) {
 #if HMB_IR_ENABLED
     if (!ir_tx_channel || !ir_copy_encoder) return;
-
-    uint8_t command = 0;
-
-    switch (state) {
-        case 0: command = IR_NEC_BLUE;   break;
-        case 1: command = IR_NEC_GREEN;  break;
-        case 2: command = IR_NEC_CYAN;   break;
-        case 3: command = IR_NEC_PURPLE; break;
-        case 4: command = IR_NEC_ORANGE; break;
-        default: return;
-    }
-
-    // Extended NEC:
-    // 16 Bit Adresse + 8 Bit Kommando + 8 Bit invertiertes Kommando
-    // Alle Datenbits LSB-first.
-    //
-    // Beispiel BLUE:
-    // Adresse : 0xEF00
-    // Kommando: 0x06
-    // RawData : 0xF906EF00
 
     const uint32_t nec_data =
         static_cast<uint32_t>(IR_NEC_ADDRESS) |
         (static_cast<uint32_t>(command) << 16) |
         (static_cast<uint32_t>(command ^ 0xFFU) << 24);
 
-    // 1 Startsymbol + 32 Datenbits + 1 Stoppsymbol
     rmt_symbol_word_t symbols[34] = {};
 
-    // NEC Header: 9000 us MARK + 4500 us SPACE
     symbols[0] = {
         .duration0 = 9000,
         .level0 = 1,
@@ -129,7 +137,6 @@ static void SendIrStatus(uint8_t state) {
         .level1 = 0
     };
 
-    // 32 Datenbits senden, LSB zuerst
     for (int bit = 0; bit < 32; ++bit) {
         const bool one = ((nec_data >> bit) & 0x01U) != 0;
 
@@ -141,7 +148,6 @@ static void SendIrStatus(uint8_t state) {
         };
     }
 
-    // NEC Stopbit: 560 us MARK, danach SPACE
     symbols[33] = {
         .duration0 = 560,
         .level0 = 1,
@@ -168,18 +174,144 @@ static void SendIrStatus(uint8_t state) {
     }
 
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "IR NEC TX Fehler: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "IR TX Fehler: %s", esp_err_to_name(err));
     } else {
         ESP_LOGI(TAG,
-                 "IR NEC TX: State=%u Address=0x%04X Command=0x%02X Raw=0x%08" PRIX32,
-                 state,
+                 "IR TX: Address=0x%04X Command=0x%02X Raw=0x%08" PRIX32,
                  IR_NEC_ADDRESS,
                  command,
                  nec_data);
     }
 #else
-    (void)state;
+    (void)command;
 #endif
+}
+
+// ============================================================
+// Radar-Status -> IR-Farbkommando
+// ============================================================
+// true: Sprachsteuerung hat Vorrang vor Radar
+// false: Radar steuert die Lichtfarbe automatisch
+static bool light_manual_override = false;
+// HMB|TEC MemoryStand – Betriebsmodus
+// true  = Radar steuert Licht und Dialog
+// false = IR-Fernbedienung steuert Licht und Dialog
+static bool radar_enabled = (HMB_RADAR_DEFAULT_ENABLED != 0);
+
+static void SendIrStatus(uint8_t state) {
+    uint8_t command;
+
+    switch (state) {
+        case 0: command = IR_NEC_BLUE;   break;
+        case 1: command = IR_NEC_GREEN;  break;
+        case 2: command = IR_NEC_CYAN;   break;
+        case 3: command = IR_NEC_PURPLE; break;
+        case 4: command = IR_NEC_ORANGE; break;
+        default: return;
+    }
+    SendIrCommand(command);
+}
+
+static void RegisterLightMcpTools() {
+    auto& mcp = McpServer::GetInstance();
+
+    mcp.AddTool(
+        "self.light.set_color",
+        "Setzt die Farbe der MemoryStand-Lampe.",
+        PropertyList({
+            Property("color", kPropertyTypeString)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            const std::string color =
+                properties["color"].value<std::string>();
+
+            uint8_t command;
+
+            if      (color == "red"    || color == "rot")     command = IR_NEC_RED;
+            else if (color == "green"  || color == "grün" ||
+                    color == "gruen")                        command = IR_NEC_GREEN;
+            else if (color == "blue"   || color == "blau")    command = IR_NEC_BLUE;
+            else if (color == "cyan"   || color == "türkis" ||
+                    color == "tuerkis")                      command = IR_NEC_CYAN;
+            else if (color == "purple" || color == "violett" ||
+                    color == "lila")                         command = IR_NEC_PURPLE;
+            else if (color == "orange")                       command = IR_NEC_ORANGE;
+            else if (color == "yellow" || color == "gelb")    command = IR_NEC_YELLOW;
+            else if (color == "white" || color == "weiß" || color == "weiss") command = IR_NEC_WEISS;
+            else return std::string("Unbekannte Farbe: ") + color;
+
+            light_manual_override = true;
+            SendIrCommand(command);
+
+            return std::string("Lichtfarbe gesetzt");
+        }
+    );
+    mcp.AddTool(
+        "self.radar.set_enabled",
+        "Aktiviert oder deaktiviert die Radarautomatik des MemoryStand. "
+        "Bei deaktiviertem Radar übernimmt die IR-Fernbedienung die Steuerung.",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            bool enabled = properties["enabled"].value<bool>();
+
+            radar_enabled = enabled;
+
+            ESP_LOGI(TAG, "HMB RADAR: %s",
+                    enabled ? "ENABLED" : "DISABLED");
+
+            return enabled
+                ? std::string("Radarautomatik aktiviert")
+                : std::string("Radarautomatik deaktiviert");
+        }
+    );
+    mcp.AddTool(
+        "self.hmbtec.get_affirmation",
+        "When the user input is exactly HMBPROMPT, "
+        "always call this tool. Execute the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+
+            std::string color;
+
+            switch (ir_selected_color) {
+                case IR_NEC_RED:
+                case IR_NEC_RED_1:
+                case IR_NEC_RED_2:
+                    color = "Rot";
+                    break;
+
+                case IR_NEC_GREEN:
+                case IR_NEC_GREEN_1:
+                case IR_NEC_GREEN_2:
+                case IR_NEC_GREEN_3:
+                    color = "Gruen";
+                    break;
+
+                case IR_NEC_BLUE:
+                case IR_NEC_BLUE_1:
+                case IR_NEC_BLUE_2:
+                case IR_NEC_BLUE_3:
+                    color = "Blau";
+                    break;
+
+                case IR_NEC_CYAN:   color = "Tuerkis"; break;
+                case IR_NEC_PURPLE: color = "Violett"; break;
+                case IR_NEC_ORANGE: color = "Orange"; break;
+                case IR_NEC_YELLOW: color = "Gelb"; break;
+                default:            color = "Weiss"; break;
+            }
+
+            return std::string(
+                "Erzeuge eine kurze, persoenliche Affirmation "
+                "auf Deutsch zur bewusst gewaehlten Farbe "
+            ) + color +
+            ". Sprich die Affirmation direkt aus. "
+            "Keine Rueckfragen, keine Erklaerungen.";
+        }
+    );
 }
 
 static led_strip_handle_t status_pixel = nullptr;
@@ -236,6 +368,28 @@ static void Ld2410Task(void* arg) {
     uint8_t previous_display_state = 255;
 
     while (true) {
+        if (!radar_enabled) {
+            if (radar_dialog_owned) {
+                radar_dialog_owned = false;
+                Application::GetInstance().EndConversation();
+                ESP_LOGI(TAG, "RADAR DISABLED: Radardialog beendet");
+            }
+            used = 0;
+            confirmed_presence = false;
+            near_confirmed = false;
+            presence_since = 0;
+            absence_since = 0;
+            near_since = 0;
+            far_since = 0;
+            wake_attempted = false;
+            last_wake_attempt_ms = 0;
+            left_until = 0;
+            last_presence = -1;
+            previous_display_state = 255;
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         int len = uart_read_bytes(UART_NUM_1, rx, sizeof(rx), pdMS_TO_TICKS(200));
         for (int i = 0; i < len; ++i) {
             if (used >= sizeof(buffer)) memmove(buffer, buffer + 1, --used);
@@ -331,7 +485,7 @@ static void Ld2410Task(void* arg) {
                                    (!wake_attempted || now - last_wake_attempt_ms >= 5000)) {
                             wake_attempted = true;
                             last_wake_attempt_ms = now;
-                            app.WakeWordInvoke("Hallo");
+                            Application::GetInstance().WakeWordInvoke("Hallo");
                             ESP_LOGI(TAG, "RADAR: Wakeword Hallo angefordert (NEAR)");
                         }
                     }
@@ -340,11 +494,23 @@ static void Ld2410Task(void* arg) {
                     uint8_t display_state = (left_until != 0 && static_cast<int32_t>(left_until - now) > 0) ? 4 :
                                             !confirmed_presence ? 0 :
                                             near_confirmed ? (radar_dialog_owned ? 3 : 2) : 1;
+                    // Nach Dialogende manuelle Lichtsteuerung aufheben
+                    if (light_manual_override &&
+                        radar_dialog_owned &&
+                        Application::GetInstance().GetDeviceState() == kDeviceStateIdle) {
+
+                        light_manual_override = false;
+                        previous_display_state = 255;  // IR-Status erneut senden
+
+                        ESP_LOGI(TAG, "LIGHT: Dialog beendet -> RADAR AUTO");
+                    }
                     if (display_state != previous_display_state) {
                         previous_display_state = display_state;
                         radar_display_state = display_state;
                         SetStatusPixel(display_state);
-                        SendIrStatus(display_state);
+                        if (!light_manual_override) {
+                            SendIrStatus(display_state);
+                        }
                         ESP_LOGI(TAG, "MemoryStand Display-State=%u", display_state);
                     }
                     if (static_cast<int>(detected) != last_presence) {
@@ -601,14 +767,60 @@ public:
         InitializeButtons();
         InitializeStatusPixel();
         InitializeIrTransmitter();
-#if HMB_IR_RX_ENABLED
-        ir_receiver_.SetCommandCallback([](uint8_t command) {
-            ESP_LOGI(TAG, "IR RX Kommando=0x%02X (Diagnose; keine Aktion)", command);
-        });
-        if (!ir_receiver_.Initialize()) {
-            ESP_LOGW(TAG, "IR RX konnte nicht initialisiert werden (GPIO%d)", static_cast<int>(IR_RX_GPIO));
-        }
-#endif
+        
+        RegisterLightMcpTools();  
+        ESP_LOGI(TAG, "HMB MCP: self.light.set_color registriert");
+
+        #if HMB_IR_RX_ENABLED
+            ir_receiver_.SetCommandCallback([](uint8_t command) {
+                if (radar_enabled) {
+                    ESP_LOGI(TAG, "IR RX=0x%02X (RADAR AUTO, nur Diagnose)", command);
+                    return;
+                }
+
+                ESP_LOGI(TAG, "IR RX=0x%02X (IR MANUAL)", command);
+                switch (command) {
+                    case IR_NEC_RED:
+                    case IR_NEC_RED_1:
+                    case IR_NEC_RED_2:
+                    case IR_NEC_GREEN:
+                    case IR_NEC_GREEN_1:
+                    case IR_NEC_GREEN_2:
+                    case IR_NEC_GREEN_3:
+                    case IR_NEC_BLUE:
+                    case IR_NEC_BLUE_1:
+                    case IR_NEC_BLUE_2:
+                    case IR_NEC_BLUE_3:
+                    case IR_NEC_CYAN:
+                    case IR_NEC_PURPLE:
+                    case IR_NEC_ORANGE:
+                    case IR_NEC_YELLOW:
+                    case IR_NEC_WEISS:
+                        ir_selected_color = command;
+                        ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
+                        break;
+                    case IR_NEC_FLASH:
+                        ESP_LOGI(TAG,
+                                "AFFIRMATION: FLASH erkannt, Farbe=0x%02X",
+                                ir_selected_color);
+
+                        // FLASH-Modus der Lampe beenden
+                        // und zuletzt gewählte Farbe wiederherstellen
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        SendIrCommand(ir_selected_color);
+                        ESP_LOGI(TAG, "AFFIRMATION: Farbe wiederhergestellt");
+                        Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
+                        ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
+                        break;
+
+                    default:
+                        break;
+                }
+            });
+                if (!ir_receiver_.Initialize()) {
+                    ESP_LOGW(TAG, "IR RX konnte nicht initialisiert werden (GPIO%d)", static_cast<int>(IR_RX_GPIO));
+                }
+        #endif
         // HMB|TEC MemoryStand – LD2410 UART
         uart_config_t radar_uart = {};
         radar_uart.baud_rate = LD2410_UART_BAUD;

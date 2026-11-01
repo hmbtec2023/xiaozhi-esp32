@@ -1745,6 +1745,7 @@ void Application::ContinueWakeWordInvoke(
     );
 
 #else
+    protocol_->SendWakeWordDetected(wake_word);
 
     play_popup_on_listening_ = true;
 
