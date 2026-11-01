@@ -18,13 +18,14 @@
 #include <driver/uart.h> // for LD2410 Radar
 #include <driver/rmt_tx.h>
 #include <driver/rmt_encoder.h>
+#include "ir_remote_controller.h"
 #include <cstring>  // memcmp(), memmove()
 #include <lvgl.h>
 
 #define TAG "HMBTEC MemoryStand"
 
 // HMB|TEC Firmware-Version (bei jeder Aenderung hochzaehlen)
-#define HMB_FIRMWARE_VERSION "0.4.5"
+#define HMB_FIRMWARE_VERSION "0.4.6"
 
 #include <led_strip.h>
 
@@ -44,13 +45,20 @@ static constexpr uint16_t NEAR_DISTANCE_CM = 100;
 // HMB|TEC IR-Statusleuchte (Extended NEC, 38 kHz).
 // Adresse und Kommandos gemaess Vorgabe; Kompatibilitaet mit Leuchte pruefen.
 #define HMB_IR_ENABLED 1
+#define HMB_IR_RX_ENABLED 1
+static constexpr gpio_num_t IR_RX_GPIO = GPIO_NUM_2; // Externer IR-Demodulator, Pinbelegung pruefen
 static constexpr gpio_num_t IR_TX_GPIO = GPIO_NUM_4; // M5Stack ATOM S3 integrierte IR-LED
-static constexpr uint16_t IR_NEC_ADDRESS = 0xEF00; // Extended NEC, 16-Bit-Adresse
-static constexpr uint8_t IR_NEC_BLUE    = 0x06;
-static constexpr uint8_t IR_NEC_GREEN   = 0x05;
-static constexpr uint8_t IR_NEC_CYAN    = 0x0D;
-static constexpr uint8_t IR_NEC_PURPLE  = 0x04;
-static constexpr uint8_t IR_NEC_ORANGE  = 0x0C;
+static constexpr uint16_t IR_NEC_ADDRESS = 0x0000; // 0xEF00; // Extended NEC, 16-Bit-Adresse
+static constexpr uint8_t IR_NEC_BLUE    = 0x11;
+static constexpr uint8_t IR_NEC_GREEN   = 0x1B;
+static constexpr uint8_t IR_NEC_CYAN    = 0x14;
+static constexpr uint8_t IR_NEC_PURPLE  = 0x0F;
+static constexpr uint8_t IR_NEC_ORANGE  = 0x1B;
+
+static constexpr uint8_t IR_NEC_OFF  = 0x1F;
+static constexpr uint8_t IR_NEC_ON  = 0x0D;
+static constexpr uint8_t IR_NEC_SMOOTH  = 0x0C;
+
 static rmt_channel_handle_t ir_tx_channel = nullptr;
 static rmt_encoder_handle_t ir_copy_encoder = nullptr;
 
@@ -155,7 +163,7 @@ static void SendIrStatus(uint8_t state) {
     if (err == ESP_OK) {
         err = rmt_tx_wait_all_done(
             ir_tx_channel,
-            pdMS_TO_TICKS(200)
+            pdMS_TO_TICKS(1000)
         );
     }
 
@@ -568,6 +576,8 @@ private:
             DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0, config.mirror_x, config.mirror_y, config.swap_xy);
         }
 
+    HmbtecIrRemoteController ir_receiver_{IR_RX_GPIO};
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -591,6 +601,14 @@ public:
         InitializeButtons();
         InitializeStatusPixel();
         InitializeIrTransmitter();
+#if HMB_IR_RX_ENABLED
+        ir_receiver_.SetCommandCallback([](uint8_t command) {
+            ESP_LOGI(TAG, "IR RX Kommando=0x%02X (Diagnose; keine Aktion)", command);
+        });
+        if (!ir_receiver_.Initialize()) {
+            ESP_LOGW(TAG, "IR RX konnte nicht initialisiert werden (GPIO%d)", static_cast<int>(IR_RX_GPIO));
+        }
+#endif
         // HMB|TEC MemoryStand – LD2410 UART
         uart_config_t radar_uart = {};
         radar_uart.baud_rate = LD2410_UART_BAUD;
