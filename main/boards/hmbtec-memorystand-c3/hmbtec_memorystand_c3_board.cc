@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.6.0
+ * PROJECT_VERSION: 0.8.1
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -562,23 +562,33 @@ public:
                         ir_selected_color = command;
                         ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
                         break;
-                        // ==========================================
-                        // UP / DOWN – XiaoZhi-Audiolautstärke
-                        // ==========================================
-                        case IR_NEC_UP:
-                        case IR_NEC_DOWN: {
-                            auto* codec = Board::GetInstance().GetAudioCodec();
+                    // ==========================================
+                    // OFF – KI-Dialog beenden
+                    // ==========================================
+                    case IR_NEC_OFF:
+                        ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden");
 
-                            int volume = codec->output_volume();
+                        Application::GetInstance().AbortSpeaking(
+                            kAbortReasonNone
+                        );
+                        break;
+                    // ==========================================
+                    // UP / DOWN – XiaoZhi-Audiolautstärke
+                    // ==========================================
+                    case IR_NEC_UP:
+                    case IR_NEC_DOWN: {
+                        auto* codec = Board::GetInstance().GetAudioCodec();
 
-                            volume += (command == IR_NEC_UP) ? 10 : -10;
-                            volume = std::clamp(volume, 0, 100);
+                        int volume = codec->output_volume();
 
-                            codec->SetOutputVolume(volume);
+                        volume += (command == IR_NEC_UP) ? 10 : -10;
+                        volume = std::clamp(volume, 0, 100);
 
-                            ESP_LOGI(TAG, "AUDIO: Lautstaerke = %d%%", volume);
-                            break;
-                        }
+                        codec->SetOutputVolume(volume);
+
+                        ESP_LOGI(TAG, "AUDIO: Lautstaerke = %d%%", volume);
+                        break;
+                    }
                     //--------------------------------------------------------------  
                     case IR_NEC_FLASH:
                     //-------------------------------------------------------------
