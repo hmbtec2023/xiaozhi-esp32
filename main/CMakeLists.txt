@@ -45,11 +45,6 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
 
-## HMB Add Arduino-ESP32 to the list of required components if the board type is HMBTEC_LICHTBLICK_BREAD
-if(CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK_BREAD)
-    list(APPEND MAIN_PRIV_REQUIRES_EXTRA arduino-esp32)
-endif()
-
 # Add board common files
 list(APPEND SOURCES
     "boards/common/board.cc"
@@ -102,14 +97,6 @@ if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
     set(BUILTIN_ICON_FONT font_material_symbols_14_1)
 elseif(CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK_BREAD)
     set(BOARD_DIR "hmbtec-lichtblick-bread")
-    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
-    set(BUILTIN_ICON_FONT font_material_symbols_14_1)
-elseif(CONFIG_BOARD_TYPE_HMBTEC_TALKCARD)
-    set(BOARD_DIR "hmbtec-talkcard")
-    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
-    set(BUILTIN_ICON_FONT font_material_symbols_14_1)
-elseif(CONFIG_BOARD_TYPE_HMBTEC_DUALEYE)
-    set(BOARD_DIR "hmbtec-dualeye")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
     set(BUILTIN_ICON_FONT font_material_symbols_14_1)
 elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_ML307)
@@ -265,11 +252,6 @@ elseif(CONFIG_BOARD_TYPE_M5STACK_ATOM_S3_ECHO_BASE)
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
     set(BUILTIN_ICON_FONT font_material_symbols_16_4)
     set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
-elseif(CONFIG_BOARD_TYPE_M5STACK_ATOM_S3_MEMORYSTAND)
-    set(BOARD_DIR "m5stack/atoms3-memorystand")
-    set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
-    set(BUILTIN_ICON_FONT font_material_symbols_16_4)
-    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
 elseif(CONFIG_BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE)
     set(BOARD_DIR "m5stack/atoms3r-echo-base")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
@@ -291,6 +273,8 @@ elseif(CONFIG_BOARD_TYPE_M5STACK_CARDPUTER_ADV)
     set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_32)
 elseif(CONFIG_BOARD_TYPE_M5STACK_ATOM_MATRIX_ECHO_BASE)
     set(BOARD_DIR "m5stack/atommatrix-echo-base")
+elseif(CONFIG_BOARD_TYPE_HMBTEC_MEMORYSTAND_C3)
+    set(BOARD_DIR "hmbtec-memorystand-c3")
 elseif(CONFIG_BOARD_TYPE_XMINI_C3_V3)
     set(BOARD_DIR "xmini/c3-v3")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
@@ -809,11 +793,6 @@ elseif(CONFIG_BOARD_TYPE_SPOTPEAR_ESP32_S3_1_28_BOX)
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
     set(BUILTIN_ICON_FONT font_material_symbols_16_4)
     set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
-elseif(CONFIG_BOARD_TYPE_HMBTEC_SPOTPEAR_128)
-    set(BOARD_DIR "hmbtec/hmbtec-spotpear-128")
-    set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
-    set(BUILTIN_ICON_FONT font_material_symbols_16_4)
-    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
 elseif(CONFIG_BOARD_TYPE_OTTO_ROBOT)
     set(BOARD_DIR "otto-robot")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
@@ -1129,7 +1108,6 @@ idf_component_register(SRCS ${SOURCES}
                         esp_psram
                         esp_netif
                         esp_eth
-                        esp_http_client
                         esp_driver_gpio
                         esp_driver_uart
                         esp_driver_spi

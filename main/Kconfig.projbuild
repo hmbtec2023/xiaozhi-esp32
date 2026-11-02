@@ -1,12 +1,5 @@
 menu "Xiaozhi Assistant"
 
-config HMB_PTT_ONLY_MIC
-bool "HMB PTT-only microphone"
-default n
-help
-    Disables idle wake-word microphone operation.
-    The microphone input is enabled only when required for PTT.
-
 config OTA_URL
     string "Default OTA URL"
     default "https://api.tenclass.net/xiaozhi/ota/"
@@ -183,12 +176,6 @@ choice BOARD_TYPE
     config BOARD_TYPE_HMBTEC_LICHTBLICK_BREAD
         bool "HMB|TEC Lichtblick Bread Compact Wi-Fi"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_HMBTEC_TALKCARD
-        bool "HMB|TEC TalkCard"
-        depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_HMBTEC_DUALEYE
-        bool "HMB|TEC XiaoZhi DualEye GC9D01"
-        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
         bool "Bread Compact Wi-Fi + LCD (面包板)"
         depends on IDF_TARGET_ESP32S3
@@ -342,9 +329,6 @@ choice BOARD_TYPE
     config BOARD_TYPE_M5STACK_ATOM_S3_ECHO_BASE
         bool "M5Stack AtomS3 + Echo Base"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_M5STACK_ATOM_S3_MEMORYSTAND
-        bool "HMBTEC MemoryStand (AtomS3)"
-        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE
         bool "M5Stack AtomS3R + Echo Base"
         depends on IDF_TARGET_ESP32S3
@@ -447,9 +431,6 @@ choice BOARD_TYPE
     config BOARD_TYPE_SPOTPEAR_ESP32_S3_1_28_BOX
         bool "Spotpear ESP32-S3 1.28 Box"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_HMBTEC_SPOTPEAR_128
-    bool "HMB|TEC Spotpear 1.28"
-    depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_SPOTPEAR_ESP32_S3_1_54_MUMA
         bool "Spotpear ESP32-S3 1.54 MUMA"
         depends on IDF_TARGET_ESP32S3
@@ -629,6 +610,9 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_XMINI_C3_4G
         bool "Xmini C3 4G"
+        depends on IDF_TARGET_ESP32C3
+    config BOARD_TYPE_HMBTEC_MEMORYSTAND_C3
+        bool "HMB|TEC MemoryStand C3"
         depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_XMINI_C3_V3
         bool "Xmini C3 V3"
