@@ -563,14 +563,13 @@ public:
                         ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
                         break;
                     // ==========================================
-                    // OFF – KI-Dialog beenden
+                    // OFF – KI-Dialog vollständig beenden
                     // ==========================================
                     case IR_NEC_OFF:
-                        ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden");
+                        ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
 
-                        Application::GetInstance().AbortSpeaking(
-                            kAbortReasonNone
-                        );
+                        Application::GetInstance().EndConversation();
+
                         break;
                     // ==========================================
                     // UP / DOWN – XiaoZhi-Audiolautstärke
