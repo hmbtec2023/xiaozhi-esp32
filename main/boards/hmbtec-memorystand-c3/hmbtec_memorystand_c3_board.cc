@@ -628,7 +628,8 @@ public:
                         break;
 
                     default:
-                        break;                    }
+                        break;      
+              }
             });
             if (!ir_receiver_.Initialize()) {
                 ESP_LOGE(TAG, "IR RX INITIALISIERUNG FEHLGESCHLAGEN!");
