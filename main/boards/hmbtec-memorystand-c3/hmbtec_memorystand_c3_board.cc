@@ -306,6 +306,113 @@ static void RegisterLightMcpTools() {
             "Erwaehne weder MCP noch HMBSEELSORGE.";
         }
     );
+    // ========================================================
+    // FADE – Geführte Achtsamkeit
+    // ========================================================
+    mcp.AddTool(
+        "self.hmbtec.start_mindfulness",
+        "When the user input is exactly HMBACHTSAMKEIT, "
+        "always call this tool. Follow the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            std::string color = "Weiss";
+
+            switch (ir_selected_color) {
+                case IR_NEC_RED:
+                case IR_NEC_RED_1:
+                case IR_NEC_RED_2:   color = "Rot"; break;
+
+                case IR_NEC_GREEN:
+                case IR_NEC_GREEN_1:
+                case IR_NEC_GREEN_2:
+                case IR_NEC_GREEN_3: color = "Gruen"; break;
+
+                case IR_NEC_BLUE:
+                case IR_NEC_BLUE_1:
+                case IR_NEC_BLUE_2:
+                case IR_NEC_BLUE_3:  color = "Blau"; break;
+
+                case IR_NEC_CYAN:    color = "Tuerkis"; break;
+                case IR_NEC_PURPLE:  color = "Violett"; break;
+                case IR_NEC_ORANGE:  color = "Orange"; break;
+                case IR_NEC_YELLOW:  color = "Gelb"; break;
+                default: break;
+            }
+
+return std::string(
+            "Du bist ein ruhiger, einfühlsamer Achtsamkeitsbegleiter. "
+            "Starte eine kurze gefuehrte Achtsamkeitsuebung auf Deutsch. "
+            "Die zuletzt bewusst gewaehlte Lichtfarbe ist "
+            ) + color +
+            ". Nutze diese Farbe als moeglichen Stimmungskontext, "
+            "nicht als erkannte Emotion. "
+            "Fuehre den Nutzer in kurzen, ruhigen Abschnitten "
+            "durch eine einfache Atem- oder Wahrnehmungsuebung. "
+            "Verwende natuerliche Pausen. "
+            "Beende die Uebung mit einer kurzen Ruhephase. "
+            "Frage anschliessend ausdruecklich: "
+            "'Wie fuehlst du dich jetzt?' "
+            "Stelle danach keine weitere Frage, sondern warte "
+            "auf die Antwort des Nutzers. "
+            "Gehe auf seine Antwort ein und biete bei Bedarf "
+            "eine weitere passende Uebung an. "
+            "Keine Diagnosen und keine Heilversprechen. "
+            "Erwaehne weder MCP noch HMBACHTSAMKEIT.";
+        }
+    );
+    // ========================================================
+    // SMOOTH – Wissensgestützte Erinnerungsreise
+    // ========================================================
+    mcp.AddTool(
+        "self.hmbtec.start_memory_journey",
+        "When the user input is exactly HMBERINNERUNG, "
+        "always call this tool. Follow the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            std::string color = "Weiss";
+
+            switch (ir_selected_color) {
+                case IR_NEC_RED:
+                case IR_NEC_RED_1:
+                case IR_NEC_RED_2:   color = "Rot"; break;
+
+                case IR_NEC_GREEN:
+                case IR_NEC_GREEN_1:
+                case IR_NEC_GREEN_2:
+                case IR_NEC_GREEN_3: color = "Gruen"; break;
+
+                case IR_NEC_BLUE:
+                case IR_NEC_BLUE_1:
+                case IR_NEC_BLUE_2:
+                case IR_NEC_BLUE_3:  color = "Blau"; break;
+
+                case IR_NEC_CYAN:    color = "Tuerkis"; break;
+                case IR_NEC_PURPLE:  color = "Violett"; break;
+                case IR_NEC_ORANGE:  color = "Orange"; break;
+                case IR_NEC_YELLOW:  color = "Gelb"; break;
+                default: break;
+            }
+
+            return std::string(
+                "Starte eine persoenliche Erinnerungsreise "
+                "auf Deutsch. Nutze aktiv die Wissensdatenbank "
+                "des aktuell verbundenen XiaoZhi-Agenten. "
+                "Beziehe dich auf bekannte Informationen "
+                "zum Foto, zu Personen, Orten oder Ereignissen. "
+                "Erfinde keine biografischen Details. "
+                "Falls keine passenden Wissensinformationen "
+                "vorliegen, frage offen nach einer Erinnerung. "
+                "Die zuletzt bewusst gewaehlte Lichtfarbe ist "
+            ) + color +
+            ". Verwende sie nur als moeglichen Stimmungskontext. "
+            "Beginne mit genau einer kurzen, persoenlichen "
+            "Frage. Warte danach auf die Antwort und fuehre "
+            "das Gespraech mit behutsamen Nachfragen weiter. "
+            "Erwaehne weder MCP noch HMBERINNERUNG.";
+        }
+    );
 }
 
 
@@ -452,7 +559,9 @@ public:
                         ir_selected_color = command;
                         ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
                         break;
+                    //--------------------------------------------------------------  
                     case IR_NEC_FLASH:
+                    //-------------------------------------------------------------
                         ESP_LOGI(TAG,
                                 "AFFIRMATION: FLASH erkannt, Farbe=0x%02X",
                                 ir_selected_color);
@@ -465,8 +574,9 @@ public:
                         Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
                         ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
                         break;
-
+                    //-------------------------------------------------------------        
                     case IR_NEC_STROBE:
+                    //-------------------------------------------------------------
                         ESP_LOGI(TAG,
                                  "SEELSORGE: STROBE erkannt, Farbe=0x%02X",
                                  ir_selected_color);
@@ -485,9 +595,40 @@ public:
                         ESP_LOGI(TAG, "SEELSORGE: XiaoZhi-Dialog angefordert");
                         break;
     
-                        default:
+                    // ==========================================
+                    // FADE – Wissensgestützte Erinnerungsreise
+                    // Originalen FADE-Lichteffekt beibehalten
+                    // ==========================================
+                    case IR_NEC_FADE:
+                        ESP_LOGI(TAG,
+                                 "ERINNERUNG: FADE erkannt, Farbkontext=0x%02X",
+                                 ir_selected_color);
+
+                        Application::GetInstance().WakeWordInvoke(
+                            "HMBERINNERUNG", false
+                        );
+
+                        ESP_LOGI(TAG, "ERINNERUNG: XiaoZhi-Dialog aktiviert");
                         break;
-                }
+
+                    // ==========================================
+                    // SMOOTH – Geführte Achtsamkeit
+                    // Originalen SMOOTH-Lichteffekt beibehalten
+                    // ==========================================
+                    case IR_NEC_SMOOTH:
+                        ESP_LOGI(TAG,
+                                 "ACHTSAMKEIT: SMOOTH erkannt, Farbkontext=0x%02X",
+                                 ir_selected_color);
+
+                        Application::GetInstance().WakeWordInvoke(
+                            "HMBACHTSAMKEIT", false
+                        );
+
+                        ESP_LOGI(TAG, "ACHTSAMKEIT: XiaoZhi aktiviert");
+                        break;
+
+                    default:
+                        break;                    }
             });
             if (!ir_receiver_.Initialize()) {
                 ESP_LOGE(TAG, "IR RX INITIALISIERUNG FEHLGESCHLAGEN!");
