@@ -35,6 +35,13 @@
 #include <driver/rmt_encoder.h>
 #include <inttypes.h>
 #include <algorithm>
+#include "led_strip.h"
+#include "device_state_machine.h"
+#include "led_strip_spi.h"
+
+#define STATUS_NEOPIXEL_GPIO        8
+#define STATUS_NEOPIXEL_COUNT      16
+#define STATUS_NEOPIXEL_BRIGHTNESS 40
 
 #define TAG "HMBMemoryStandC3"
 
@@ -106,7 +113,6 @@ static void InitializeIrTransmitter() {
 // Universeller IR-NEC-Sender
 // GPIO10 / 38 kHz / Adresse 0x0000
 // ============================================================
-
 static void SendIrCommand(uint8_t command) {
 #if HMB_IR_ENABLED
     if (!ir_tx_channel || !ir_copy_encoder) return;
@@ -175,6 +181,53 @@ static void SendIrCommand(uint8_t command) {
 #endif
 }
 
+// ============================================================
+// HMB|TEC MemoryStand – NeoPixel V0.1
+// GPIO8 / 16 WS2812 / ESP-IDF led_strip
+// ============================================================
+
+static led_strip_handle_t status_strip = nullptr;
+
+static void StatusPixelFill(uint8_t r, uint8_t g, uint8_t b) {
+    if (!status_strip) return;
+
+    for (int i = 0; i < STATUS_NEOPIXEL_COUNT; i++) {
+        led_strip_set_pixel(status_strip, i, r, g, b);
+    }
+
+    led_strip_refresh(status_strip);
+}
+
+static void InitializeStatusPixels() {
+    led_strip_config_t strip_config = {};
+    strip_config.strip_gpio_num = STATUS_NEOPIXEL_GPIO;
+    strip_config.max_leds = STATUS_NEOPIXEL_COUNT;
+    strip_config.led_model = LED_MODEL_WS2812;
+    strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+
+    led_strip_spi_config_t spi_config = {};
+    spi_config.clk_src = SPI_CLK_SRC_DEFAULT;
+    spi_config.spi_bus = SPI2_HOST;
+    spi_config.flags.with_dma = true;
+
+    esp_err_t err = led_strip_new_spi_device(
+        &strip_config,
+        &spi_config,
+        &status_strip
+    );
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NeoPixel SPI: %s", esp_err_to_name(err));
+        return;
+    }
+
+    led_strip_clear(status_strip);
+    StatusPixelFill(10, 10, 10);
+
+    ESP_LOGI(TAG, "NeoPixel SPI: %d LEDs an GPIO%d bereit",
+             STATUS_NEOPIXEL_COUNT,
+             STATUS_NEOPIXEL_GPIO);
+}
 
 static void RegisterLightMcpTools() {
     auto& mcp = McpServer::GetInstance();
@@ -418,6 +471,32 @@ return std::string(
     );
 }
 
+static void UpdateStatusPixels(DeviceState state) {
+    switch (state) {
+        case kDeviceStateIdle:
+            StatusPixelFill(10, 10, 10);   // Weiß
+            break;
+
+        case kDeviceStateListening:
+            StatusPixelFill(0, 0, 40);     // Blau
+            break;
+
+        case kDeviceStateSpeaking:
+            StatusPixelFill(0, 40, 0);     // Grün
+            break;
+
+        case kDeviceStateConnecting:
+            StatusPixelFill(40, 20, 0);    // Orange
+            break;
+
+        case kDeviceStateFatalError:
+            StatusPixelFill(40, 0, 0);     // Rot
+            break;
+
+        default:
+            break;
+    }
+}
 
 class HmbtecMemoryStandC3Board : public WifiBoard {
 
@@ -537,6 +616,16 @@ public:
 
         InitializeI2C();
         InitializeDisplay();
+        // NeoPixel-Anzeige mit XiaoZhi-Zustandsmaschine verbinden
+        Application::GetInstance().RegisterStateChangeListener(
+            [](DeviceState old_state, DeviceState new_state) {
+                ESP_LOGI(TAG, "NeoPixel: State %d -> %d",
+                        static_cast<int>(old_state),
+                        static_cast<int>(new_state));
+
+                UpdateStatusPixels(new_state);
+            }
+        ); 
         InitializeButtons();
         InitializeIrTransmitter();
         RegisterLightMcpTools();
@@ -665,7 +754,7 @@ public:
             } else {
                 ESP_LOGI(TAG, "IR RX BEREIT - GPIO%d", static_cast<int>(IR_RX_GPIO));
             }
-
+            InitializeStatusPixels();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
