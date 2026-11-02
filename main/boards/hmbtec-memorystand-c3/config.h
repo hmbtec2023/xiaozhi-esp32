@@ -20,3 +20,5 @@
 #define LD2410_RX_GPIO GPIO_NUM_1
 #define LD2410_TX_GPIO GPIO_NUM_2
 #endif
+
+#define HMB_IR_ENABLED 1
