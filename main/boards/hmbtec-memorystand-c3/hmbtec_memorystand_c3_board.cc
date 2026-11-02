@@ -253,6 +253,59 @@ static void RegisterLightMcpTools() {
             "Keine Rueckfragen, keine Erklaerungen.";
         }
     );
+    mcp.AddTool(
+        "self.hmbtec.start_seelsorge",
+        "When the user input is exactly HMBSEELSORGE, "
+        "always call this tool. Execute the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+
+            std::string color;
+
+            switch (ir_selected_color) {
+                case IR_NEC_RED:
+                case IR_NEC_RED_1:
+                case IR_NEC_RED_2:
+                    color = "Rot";
+                    break;
+
+                case IR_NEC_GREEN:
+                case IR_NEC_GREEN_1:
+                case IR_NEC_GREEN_2:
+                case IR_NEC_GREEN_3:
+                    color = "Gruen";
+                    break;
+
+                case IR_NEC_BLUE:
+                case IR_NEC_BLUE_1:
+                case IR_NEC_BLUE_2:
+                case IR_NEC_BLUE_3:
+                    color = "Blau";
+                    break;
+
+                case IR_NEC_CYAN:   color = "Tuerkis"; break;
+                case IR_NEC_PURPLE: color = "Violett"; break;
+                case IR_NEC_ORANGE: color = "Orange"; break;
+                case IR_NEC_YELLOW: color = "Gelb"; break;
+                default:            color = "Weiss"; break;
+            }
+
+            return std::string(
+                "Du bist ein ruhiger, empathischer Gespraechsbegleiter "
+                "im HMBTEC MemoryStand. "
+                "Der Nutzer hat bewusst die Lichtfarbe "
+            ) + color +
+            " gewaehlt. Betrachte diese Farbe als moeglichen "
+            "Stimmungskontext, nicht als sichere Emotion. "
+            "Beginne jetzt mit einer kurzen, persoenlichen "
+            "und offenen Frage auf Deutsch. "
+            "Hoere danach aufmerksam zu und fuehre "
+            "das Gespraech behutsam weiter. "
+            "Keine Diagnosen, keine ungefragten Ratschlaege. "
+            "Erwaehne weder MCP noch HMBSEELSORGE.";
+        }
+    );
 }
 
 
@@ -413,7 +466,26 @@ public:
                         ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
                         break;
 
-                    default:
+                    case IR_NEC_STROBE:
+                        ESP_LOGI(TAG,
+                                 "SEELSORGE: STROBE erkannt, Farbe=0x%02X",
+                                 ir_selected_color);
+
+                        // STROBE beenden und vorherige Farbe wiederherstellen
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        SendIrCommand(ir_selected_color);
+
+                        ESP_LOGI(TAG, "SEELSORGE: Farbe wiederhergestellt");
+
+                        // XiaoZhi-Seelsorge über MCP auslösen
+                        Application::GetInstance().WakeWordInvoke(
+                            "HMBSEELSORGE", false
+                        );
+
+                        ESP_LOGI(TAG, "SEELSORGE: XiaoZhi-Dialog angefordert");
+                        break;
+    
+                        default:
                         break;
                 }
             });
