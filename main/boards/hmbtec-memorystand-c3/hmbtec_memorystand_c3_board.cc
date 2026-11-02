@@ -34,6 +34,7 @@
 #include <driver/rmt_tx.h>
 #include <driver/rmt_encoder.h>
 #include <inttypes.h>
+#include <algorithm>
 
 #define TAG "HMBMemoryStandC3"
 
@@ -61,6 +62,8 @@ static constexpr uint8_t IR_NEC_WEISS   = 0x15;
 
 static constexpr uint8_t IR_NEC_OFF     = 0x1F;
 static constexpr uint8_t IR_NEC_ON      = 0x0D;
+static constexpr uint8_t IR_NEC_UP      = 0x09;
+static constexpr uint8_t IR_NEC_DOWN    = 0x1D;
 static constexpr uint8_t IR_NEC_FLASH   = 0x4D;
 static constexpr uint8_t IR_NEC_STROBE  = 0x00;
 static constexpr uint8_t IR_NEC_FADE    = 0x1A;
@@ -559,6 +562,23 @@ public:
                         ir_selected_color = command;
                         ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
                         break;
+                        // ==========================================
+                        // UP / DOWN – XiaoZhi-Audiolautstärke
+                        // ==========================================
+                        case IR_NEC_UP:
+                        case IR_NEC_DOWN: {
+                            auto* codec = Board::GetInstance().GetAudioCodec();
+
+                            int volume = codec->output_volume();
+
+                            volume += (command == IR_NEC_UP) ? 10 : -10;
+                            volume = std::clamp(volume, 0, 100);
+
+                            codec->SetOutputVolume(volume);
+
+                            ESP_LOGI(TAG, "AUDIO: Lautstaerke = %d%%", volume);
+                            break;
+                        }
                     //--------------------------------------------------------------  
                     case IR_NEC_FLASH:
                     //-------------------------------------------------------------
