@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.8.2
+ * PROJECT_VERSION: 0.9.2
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -10,6 +10,7 @@
  * - INMP441 Mikrofon
  * - MAX98357A Lautsprecher
  * - SSD1306 OLED 128x64, I2C 0x3C
+ * - TCS34725 RGBC-Sensor, I2C 0x29 / LED via INT
  *
  * OLED: SDA=20, SCL=21
  * I2S: BCLK=4, WS=5, DIN=6, DOUT=7
@@ -334,6 +335,17 @@ static const char* GetSelectedColorName(uint8_t command) {
     }
 }
 
+// Gemeinsamer Farbpfad: IR-RX ohne Echo, Sensor/MCP mit IR-TX.
+static void SetSelectedColor(uint8_t command, bool send_ir) {
+    ir_selected_color = command;
+#if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+    UpdateLampPixels(command);
+#endif
+    if (send_ir) SendIrCommand(command);
+    ESP_LOGI(TAG, "FARBE: %s (0x%02X) IR-TX=%s",
+             GetSelectedColorName(command), command, send_ir ? "JA" : "NEIN");
+}
+
 static void InitializeStatusPixels() {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = STATUS_NEOPIXEL_GPIO;
@@ -373,14 +385,6 @@ static void RegisterLightMcpTools() {
     auto& mcp = McpServer::GetInstance();
 
     mcp.AddTool(
-        "self.hmbtec.get_color_context",
-        "Liefert die aktuell vom Nutzer gewaehlte Lichtfarbe.",
-        PropertyList(),
-        [](const PropertyList&) -> ReturnValue {
-            return std::string(GetSelectedColorName(ir_selected_color));
-        }
-    );
-    mcp.AddTool(
         "self.light.set_color",
         "Setzt die Farbe der MemoryStand-Lampe.",
         PropertyList({
@@ -405,11 +409,7 @@ static void RegisterLightMcpTools() {
             else if (color == "white" || color == "weiß" || color == "weiss") command = IR_NEC_WEISS;
             else return std::string("Unbekannte Farbe: ") + color;
 
-            ir_selected_color = command;
-            SendIrCommand(command);
-            #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                UpdateLampPixels(command);
-            #endif
+            SetSelectedColor(command, true);
 
             return std::string("Lichtfarbe gesetzt");
         }
@@ -582,6 +582,176 @@ private:
 
     Display* display_ = nullptr;
 
+    // TCS34725 am vorhandenen I2C-Masterbus
+    i2c_master_dev_handle_t color_sensor_ = nullptr;
+    bool color_sensor_ready_ = false;
+
+    esp_err_t WriteColorRegister(uint8_t reg, uint8_t value) {
+        if (!color_sensor_) return ESP_ERR_INVALID_STATE;
+        const uint8_t data[2] = {static_cast<uint8_t>(0x80 | reg), value};
+        return i2c_master_transmit(color_sensor_, data, sizeof(data), 100);
+    }
+
+    esp_err_t ReadColorRegister(uint8_t reg, uint8_t* value) {
+        if (!color_sensor_ || !value) return ESP_ERR_INVALID_ARG;
+        const uint8_t address = static_cast<uint8_t>(0x80 | reg);
+        return i2c_master_transmit_receive(color_sensor_, &address, 1, value, 1, 100);
+    }
+
+    void SetSensorLed(bool on) {
+        if (!color_sensor_ready_) return;
+        uint8_t enable = 0;
+        esp_err_t err = ReadColorRegister(0x00, &enable);
+        if (err == ESP_OK) {
+            // Entspricht tcs.setInterrupt(!on): AIEN-Bit schalten.
+            // LED-Verhalten setzt entsprechende INT-LED-Breakout-Beschaltung voraus.
+            enable = on ? static_cast<uint8_t>(enable & ~0x10U)
+                        : static_cast<uint8_t>(enable | 0x10U);
+            err = WriteColorRegister(0x00, enable);
+        }
+        if (err != ESP_OK) ESP_LOGW(TAG, "TCS LED: %s", esp_err_to_name(err));
+        else ESP_LOGI(TAG, "TCS LED via INT/I2C: %s", on ? "ON" : "OFF");
+    }
+
+    bool ReadSensorRGB(uint16_t& r, uint16_t& g, uint16_t& b, uint16_t& clear) {
+        if (!color_sensor_ready_) return false;
+        const uint8_t address = 0x80 | 0x20 | 0x14; // Auto-Increment, CDATAL
+        uint8_t data[8] = {};
+        esp_err_t err = i2c_master_transmit_receive(
+            color_sensor_, &address, 1, data, sizeof(data), 100);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "TCS RGBC: %s", esp_err_to_name(err));
+            return false;
+        }
+        clear = static_cast<uint16_t>(data[0] | (data[1] << 8));
+        r = static_cast<uint16_t>(data[2] | (data[3] << 8));
+        g = static_cast<uint16_t>(data[4] | (data[5] << 8));
+        b = static_cast<uint16_t>(data[6] | (data[7] << 8));
+        return true;
+    }
+
+    // TCS34725: 100-ms-Integrationszeit (ATIME 0xD5), LED normalerweise AUS.
+    // Schwellwerte aus Messreihe: frei ~800, abgedeckt ~15.
+    // Unterscheidung durch 3 aufeinanderfolgende Messungen (Hysterese).
+    static constexpr uint16_t kCoverThreshold = 50;
+    static constexpr uint16_t kReleaseThreshold = 300;
+
+    // Einfache erste Klassifizierung; Messwerte sind NICHT kalibriert.
+    // Nur 8 Basisfarben; weitere Nuancen folgen nach realen RGB-Logs.
+    static bool ClassifyColor(uint16_t r, uint16_t g, uint16_t b,
+                              uint16_t clear, uint8_t& command) {
+        if (clear < 35 || clear >= 65000) return false;
+        const uint32_t sum = static_cast<uint32_t>(r) + g + b;
+        if (sum < 60) return false;
+        const float rn = static_cast<float>(r) / sum;
+        const float gn = static_cast<float>(g) / sum;
+        const float bn = static_cast<float>(b) / sum;
+        //if (rn > 0.40f && gn > 0.28f && bn < 0.22f) command = IR_NEC_YELLOW;
+        if (rn > 0.3f && gn > 0.28f && bn < 0.22f) command = IR_NEC_YELLOW;
+        else if (rn > 0.49f && gn > 0.19f && bn < 0.20f) command = IR_NEC_ORANGE;
+        //else if (rn > 0.48f && rn > gn * 1.45f && rn > bn * 1.45f) command = IR_NEC_RED;
+        else if (rn > 0.35f &&
+                rn > gn * 1.1f &&
+                rn > bn * 1.1f)
+            command = IR_NEC_RED;
+        else if (gn > 0.43f && gn > rn * 1.25f && gn > bn * 1.20f) command = IR_NEC_GREEN;
+        else if (bn > 0.43f && bn > rn * 1.25f && bn > gn * 1.20f) command = IR_NEC_BLUE;
+        else if (gn > rn * 1.20f && bn > rn * 1.20f) command = IR_NEC_CYAN;
+        //else if (rn > gn * 1.20f && bn > gn * 1.20f) command = IR_NEC_PURPLE;
+        else if (rn > gn * 0.9f && bn > gn * 1.20f) command = IR_NEC_PURPLE;
+        else command = IR_NEC_WEISS;
+        return true;
+    }
+
+    static void ColorScanTask(void* arg) {
+        auto* board = static_cast<HmbtecMemoryStandC3Board*>(arg);
+        enum class State { WAIT, SCAN, LOCK };
+        State state = State::WAIT;
+        int consecutive = 0;
+        vTaskDelay(pdMS_TO_TICKS(250));
+        while (true) {
+            uint16_t r = 0, g = 0, b = 0, clear = 0;
+            if (!board->ReadSensorRGB(r, g, b, clear)) {
+                vTaskDelay(pdMS_TO_TICKS(200));
+                continue;
+            }
+            if (state == State::WAIT) {
+                consecutive = (clear < kCoverThreshold) ? consecutive + 1 : 0;
+                if (consecutive >= 3) {
+                    state = State::SCAN;
+                    consecutive = 0;
+                    ESP_LOGI(TAG, "TCS AUFLAGE erkannt: C=%u", clear);
+                    board->SetSensorLed(true);
+                    // Neue RGBC-Integration mit Beleuchtung abwarten.
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                    uint16_t sr=0, sg=0, sb=0, sc=0;
+                    if (board->ReadSensorRGB(sr, sg, sb, sc)) {
+                        ESP_LOGI(TAG, "TCS SCAN: R=%u G=%u B=%u C=%u", sr,sg,sb,sc);
+                        uint8_t cmd = 0;
+                        if (ClassifyColor(sr, sg, sb, sc, cmd)) {
+                            SetSelectedColor(cmd, true);
+                        } else {
+                            ESP_LOGW(TAG, "TCS SCAN ungueltig (zu dunkel/gesaettigt)");
+                        }
+                    }
+                    board->SetSensorLed(false);
+                    // Nach LED AUS mindestens eine Integration verstreichen lassen.
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                    state = State::LOCK;
+                }
+            } else if (state == State::LOCK) {
+                consecutive = (clear > kReleaseThreshold) ? consecutive + 1 : 0;
+                if (consecutive >= 3) {
+                    ESP_LOGI(TAG, "TCS ENTFERNT: C=%u, bereit", clear);
+                    consecutive = 0;
+                    state = State::WAIT;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    void StartColorScanTask() {
+        if (!color_sensor_ready_) return;
+        if (xTaskCreate(ColorScanTask, "tcs_scan", 4096, this, 2, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "TCS Scan-Task konnte nicht gestartet werden");
+        }
+    }
+
+    void InitializeColorSensor() {
+        i2c_device_config_t config = {};
+        config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        config.device_address = 0x29;
+        config.scl_speed_hz = 100000;
+        esp_err_t err = i2c_master_bus_add_device(i2c_bus_, &config, &color_sensor_);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "TCS I2C add: %s", esp_err_to_name(err));
+            return;
+        }
+        uint8_t id = 0;
+        err = ReadColorRegister(0x12, &id); // ID
+        if (err != ESP_OK || (id != 0x44 && id != 0x4D && id != 0x10)) {
+            ESP_LOGW(TAG, "TCS nicht erkannt: ID=0x%02X err=%s", id, esp_err_to_name(err));
+            i2c_master_bus_rm_device(color_sensor_);
+            color_sensor_ = nullptr;
+            return;
+        }
+        // ATIME=0xD5: ~101 ms; CONTROL=0x01: Gain 4x
+        err = WriteColorRegister(0x01, 0xD5);
+        if (err == ESP_OK) err = WriteColorRegister(0x0F, 0x01);
+        if (err == ESP_OK) err = WriteColorRegister(0x00, 0x01); // PON
+        if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(3));
+        if (err == ESP_OK) err = WriteColorRegister(0x00, 0x03); // PON + AEN
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "TCS Init: %s", esp_err_to_name(err));
+            return;
+        }
+        color_sensor_ready_ = true;
+        SetSensorLed(false);
+        ESP_LOGI(TAG, "TCS34725 bereit: Adresse=0x29 ID=0x%02X", id);
+    }
+
+
     void InitializeI2C() {
 
         ESP_LOGI(TAG, "Initializing I2C SDA=%d SCL=%d",
@@ -670,10 +840,12 @@ public:
     HmbtecMemoryStandC3Board()
         : boot_button_(GPIO_NUM_9, false) {
 
-        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.6.0");
+        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.2");
 
         InitializeI2C();
         InitializeDisplay();
+        InitializeColorSensor();
+
         // NeoPixel-Anzeige mit XiaoZhi-Zustandsmaschine verbinden
         Application::GetInstance().RegisterStateChangeListener(
             [](DeviceState old_state, DeviceState new_state) {
@@ -706,13 +878,7 @@ public:
                     case IR_NEC_ORANGE:
                     case IR_NEC_YELLOW:
                     case IR_NEC_WEISS:
-                        ir_selected_color = command;
-
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            UpdateLampPixels(command);
-                        #endif
-
-                        ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
+                        SetSelectedColor(command, false);
                         break;
                     // ==========================================
                     // OFF – KI-Dialog vollständig beenden
@@ -830,6 +996,7 @@ public:
                 ESP_LOGI(TAG, "IR RX BEREIT - GPIO%d", static_cast<int>(IR_RX_GPIO));
             }
             InitializeStatusPixels();
+            StartColorScanTask();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
