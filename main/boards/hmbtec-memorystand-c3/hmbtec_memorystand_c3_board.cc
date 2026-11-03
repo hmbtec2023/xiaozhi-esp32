@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.8.1
+ * PROJECT_VERSION: 0.8.2
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -302,6 +302,38 @@ static void UpdateLampPixels(uint8_t command) {
     }
 }
 
+// ============================================================
+// HMB|TEC MemoryStand – Zentrale Farbnamen für XiaoZhi
+// Grundlage: RGB-Zuordnung aus UpdateLampPixels()
+// ============================================================
+static const char* GetSelectedColorName(uint8_t command) {
+
+    switch (command) {
+
+        case IR_NEC_RED:       return "Rot";
+        case IR_NEC_RED_1:     return "Hellrot";
+        case IR_NEC_RED_2:     return "Bernsteinorange";
+
+        case IR_NEC_GREEN:     return "Gruen";
+        case IR_NEC_GREEN_1:   return "Hellgruen";
+        case IR_NEC_GREEN_2:   return "Cyanblau";
+        case IR_NEC_GREEN_3:   return "Dunkelblau";
+
+        case IR_NEC_BLUE:      return "Blau";
+        case IR_NEC_BLUE_1:    return "Hellblau";
+        case IR_NEC_BLUE_2:    return "Violettrot";
+        case IR_NEC_BLUE_3:    return "Magenta";
+
+        case IR_NEC_CYAN:      return "Tuerkis";
+        case IR_NEC_PURPLE:    return "Violett";
+        case IR_NEC_ORANGE:    return "Orange";
+        case IR_NEC_YELLOW:    return "Gelb";
+        case IR_NEC_WEISS:     return "Weiss";
+
+        default:               return "Unbekannt";
+    }
+}
+
 static void InitializeStatusPixels() {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = STATUS_NEOPIXEL_GPIO;
@@ -340,6 +372,14 @@ static void InitializeStatusPixels() {
 static void RegisterLightMcpTools() {
     auto& mcp = McpServer::GetInstance();
 
+    mcp.AddTool(
+        "self.hmbtec.get_color_context",
+        "Liefert die aktuell vom Nutzer gewaehlte Lichtfarbe.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            return std::string(GetSelectedColorName(ir_selected_color));
+        }
+    );
     mcp.AddTool(
         "self.light.set_color",
         "Setzt die Farbe der MemoryStand-Lampe.",
@@ -382,35 +422,7 @@ static void RegisterLightMcpTools() {
         PropertyList(),
         [](const PropertyList& properties) -> ReturnValue {
 
-            std::string color;
-
-            switch (ir_selected_color) {
-                case IR_NEC_RED:
-                case IR_NEC_RED_1:
-                case IR_NEC_RED_2:
-                    color = "Rot";
-                    break;
-
-                case IR_NEC_GREEN:
-                case IR_NEC_GREEN_1:
-                case IR_NEC_GREEN_2:
-                case IR_NEC_GREEN_3:
-                    color = "Gruen";
-                    break;
-
-                case IR_NEC_BLUE:
-                case IR_NEC_BLUE_1:
-                case IR_NEC_BLUE_2:
-                case IR_NEC_BLUE_3:
-                    color = "Blau";
-                    break;
-
-                case IR_NEC_CYAN:   color = "Tuerkis"; break;
-                case IR_NEC_PURPLE: color = "Violett"; break;
-                case IR_NEC_ORANGE: color = "Orange"; break;
-                case IR_NEC_YELLOW: color = "Gelb"; break;
-                default:            color = "Weiss"; break;
-            }
+            const std::string color = GetSelectedColorName(ir_selected_color);
 
             return std::string(
                 "Erzeuge eine kurze, persoenliche Affirmation "
@@ -428,35 +440,7 @@ static void RegisterLightMcpTools() {
         PropertyList(),
         [](const PropertyList& properties) -> ReturnValue {
 
-            std::string color;
-
-            switch (ir_selected_color) {
-                case IR_NEC_RED:
-                case IR_NEC_RED_1:
-                case IR_NEC_RED_2:
-                    color = "Rot";
-                    break;
-
-                case IR_NEC_GREEN:
-                case IR_NEC_GREEN_1:
-                case IR_NEC_GREEN_2:
-                case IR_NEC_GREEN_3:
-                    color = "Gruen";
-                    break;
-
-                case IR_NEC_BLUE:
-                case IR_NEC_BLUE_1:
-                case IR_NEC_BLUE_2:
-                case IR_NEC_BLUE_3:
-                    color = "Blau";
-                    break;
-
-                case IR_NEC_CYAN:   color = "Tuerkis"; break;
-                case IR_NEC_PURPLE: color = "Violett"; break;
-                case IR_NEC_ORANGE: color = "Orange"; break;
-                case IR_NEC_YELLOW: color = "Gelb"; break;
-                default:            color = "Weiss"; break;
-            }
+            const std::string color = GetSelectedColorName(ir_selected_color);
 
             return std::string(
                 "Du bist ein ruhiger, empathischer Gespraechsbegleiter "
@@ -483,29 +467,7 @@ static void RegisterLightMcpTools() {
         "Do not mention the trigger or tool.",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
-            std::string color = "Weiss";
-
-            switch (ir_selected_color) {
-                case IR_NEC_RED:
-                case IR_NEC_RED_1:
-                case IR_NEC_RED_2:   color = "Rot"; break;
-
-                case IR_NEC_GREEN:
-                case IR_NEC_GREEN_1:
-                case IR_NEC_GREEN_2:
-                case IR_NEC_GREEN_3: color = "Gruen"; break;
-
-                case IR_NEC_BLUE:
-                case IR_NEC_BLUE_1:
-                case IR_NEC_BLUE_2:
-                case IR_NEC_BLUE_3:  color = "Blau"; break;
-
-                case IR_NEC_CYAN:    color = "Tuerkis"; break;
-                case IR_NEC_PURPLE:  color = "Violett"; break;
-                case IR_NEC_ORANGE:  color = "Orange"; break;
-                case IR_NEC_YELLOW:  color = "Gelb"; break;
-                default: break;
-            }
+            const std::string color = GetSelectedColorName(ir_selected_color);
 
 return std::string(
             "Du bist ein ruhiger, einfühlsamer Achtsamkeitsbegleiter. "
@@ -538,29 +500,7 @@ return std::string(
         "Do not mention the trigger or tool.",
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
-            std::string color = "Weiss";
-
-            switch (ir_selected_color) {
-                case IR_NEC_RED:
-                case IR_NEC_RED_1:
-                case IR_NEC_RED_2:   color = "Rot"; break;
-
-                case IR_NEC_GREEN:
-                case IR_NEC_GREEN_1:
-                case IR_NEC_GREEN_2:
-                case IR_NEC_GREEN_3: color = "Gruen"; break;
-
-                case IR_NEC_BLUE:
-                case IR_NEC_BLUE_1:
-                case IR_NEC_BLUE_2:
-                case IR_NEC_BLUE_3:  color = "Blau"; break;
-
-                case IR_NEC_CYAN:    color = "Tuerkis"; break;
-                case IR_NEC_PURPLE:  color = "Violett"; break;
-                case IR_NEC_ORANGE:  color = "Orange"; break;
-                case IR_NEC_YELLOW:  color = "Gelb"; break;
-                default: break;
-            }
+            const std::string color = GetSelectedColorName(ir_selected_color);
 
             return std::string(
                 "Starte eine persoenliche Erinnerungsreise "
