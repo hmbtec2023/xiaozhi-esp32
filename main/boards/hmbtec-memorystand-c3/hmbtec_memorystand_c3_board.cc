@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.9.2
+ * PROJECT_VERSION: 0.9.4
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -90,6 +90,27 @@ static rmt_encoder_handle_t ir_copy_encoder = nullptr;
 
 // Zuletzt per IR-Fernbedienung gewählte Farbe
 static uint8_t ir_selected_color = IR_NEC_WEISS;
+
+// ColorTales: Figurenwechsel innerhalb einer laufenden Geschichte.
+enum class ColorTalesState : uint8_t {
+    CT_OFF,
+    CT_ACTIVE,
+    CT_SWITCHING,
+    CT_PAUSED
+};
+static ColorTalesState ct_state = ColorTalesState::CT_OFF;
+static uint8_t ct_active_color = IR_NEC_WEISS;
+
+static const char* GetColorTalesCharacter(uint8_t color) {
+    switch (color) {
+        case IR_NEC_RED:    return "DRAGO";
+        case IR_NEC_BLUE:   return "FINN";
+        case IR_NEC_GREEN:  return "LILLI";
+        case IR_NEC_YELLOW: return "FIPS";
+        default:            return nullptr;
+    }
+}
+
 
 static void InitializeIrTransmitter() {
     #if HMB_IR_ENABLED
@@ -339,15 +360,83 @@ static const char* GetSelectedColorName(uint8_t command) {
     }
 }
 
-// Gemeinsamer Farbpfad: IR-RX ohne Echo, Sensor/MCP mit IR-TX.
+// ============================================================
+// HMB|TEC ColorTales – Farbauswahl und Figurenwechsel V0.9.4
+// ============================================================
+
 static void SetSelectedColor(uint8_t command, bool send_ir) {
+
     ir_selected_color = command;
-#if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-    UpdateLampPixels(command);
-#endif
-    if (send_ir) SendIrCommand(command);
-    ESP_LOGI(TAG, "FARBE: %s (0x%02X) IR-TX=%s",
-             GetSelectedColorName(command), command, send_ir ? "JA" : "NEIN");
+
+    #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+        UpdateLampPixels(command);
+    #endif
+
+    if (send_ir) {
+        SendIrCommand(command);
+    }
+
+    ESP_LOGI(TAG,
+             "FARBE: %s (0x%02X) IR-TX=%s",
+             GetSelectedColorName(command),
+             command,
+             send_ir ? "JA" : "NEIN");
+
+    // Außerhalb von ColorTales nur die Lichtfarbe ändern
+    if (ct_state == ColorTalesState::CT_OFF) {
+        return;
+    }
+
+    // --------------------------------------------------------
+    // WEISS – Geschichte pausieren
+    // --------------------------------------------------------
+    if (command == IR_NEC_WEISS) {
+
+        if (ct_state != ColorTalesState::CT_PAUSED) {
+
+            ESP_LOGI(TAG,
+                     "COLORTALES: WEISS -> Story pausieren");
+
+            ct_state = ColorTalesState::CT_PAUSED;
+            ct_active_color = IR_NEC_WEISS;
+        }
+
+        return;
+    }
+
+    // --------------------------------------------------------
+    // Nur die vier definierten Protagonisten zulassen
+    // --------------------------------------------------------
+    const char* character = GetColorTalesCharacter(command);
+
+    if (!character) {
+        return;
+    }
+
+    // Gleiche Figur: keine Aktion
+    if (ct_state == ColorTalesState::CT_ACTIVE &&
+        command == ct_active_color) {
+        return;
+    }
+
+    // --------------------------------------------------------
+    // Figurenwechsel oder Fortsetzung nach WEISS
+    // --------------------------------------------------------
+    const bool resume =
+        (ct_state == ColorTalesState::CT_PAUSED);
+
+    ct_state = ColorTalesState::CT_SWITCHING;
+    ct_active_color = command;
+
+    ESP_LOGI(TAG,
+             "COLORTALES: %s -> %s",
+             resume ? "FORTSETZUNG" : "FIGURENWECHSEL",
+             character);
+
+    // Bestehenden Gesprächskontext möglichst erhalten
+    Application::GetInstance().ColorTalesSwitch();
+
+    ct_state = ColorTalesState::CT_ACTIVE;
 }
 
 static void InitializeStatusPixels() {
@@ -441,7 +530,7 @@ static void RegisterLightMcpTools() {
     //--- HMB|TEC ColorTales – Character Engine V0.2
     mcp.AddTool(
         "self.hmbtec.get_colortale",
-        "When the user input is exactly HMBPROMPT, "
+        "When the user input is exactly HMBCOLORTALES, "
         "always call this tool. Execute the returned instruction. "
         "Do not mention the trigger or tool.",
         PropertyList(),
@@ -468,7 +557,7 @@ static void RegisterLightMcpTools() {
             else if (color == "Gruen") {
                 persona =
                     "Du bist LILLI, eine kluge, freundliche Eule. "
-                    "Sprich ruhig, warm und einfu ehlsam. "
+                    "Sprich ruhig, warm und einfuehlsam. "
                     "Du liebst Raetsel und Entdeckungen. ";
             }
             else if (color == "Gelb") {
@@ -493,6 +582,35 @@ static void RegisterLightMcpTools() {
                 "und frage das Kind, welches Abenteuer "
                 "es heute erleben moechte. "
                 "Warte anschliessend auf seine Antwort.";
+        }
+    );
+
+    // ColorTales: Wechsel der Sprecherfigur bei bestehender Handlung.
+    mcp.AddTool(
+        "self.hmbtec.switch_colortale",
+        "When the user input is exactly HMBCOLORTALESWECHSEL, "
+        "always call this tool. Execute the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            const char* character = GetColorTalesCharacter(ct_active_color);
+            if (!character && ct_active_color != IR_NEC_WEISS)
+                return std::string("Keine neue Geschichtenfigur.");
+            return std::string(
+                "ColorTales: Eine neue Figur uebernimmt die laufende Geschichte. "
+                "Die neue Figur ist ") +
+                (character ? character : "ein freundlicher neutraler Erzaehler") +
+                ". Sprich ab sofort als diese Figur, mit ihrer eigenen Art. "
+                "DRAGO ist ein freundlicher, weiser Drache; "
+                "FINN ein neugieriger, verspielter Delfin; "
+                "LILLI eine kluge, einfuehlsame Eule; "
+                "FIPS ein frecher, humorvoller Fuchs. "
+                "Behalte die bisherige Handlung, Orte und Ereignisse bei. "
+                "Beginne keine neue Geschichte. "
+                "Uebernimm an der letzten Stelle, begruesse das Kind kurz "
+                "und erzaehle in kurzen kindgerechten Saetzen weiter. "
+                "Falls der bisherige Verlauf nicht verfuegbar ist, "
+                "frage knapp, was zuletzt geschehen ist.";
         }
     );
 
@@ -908,7 +1026,7 @@ public:
     HmbtecMemoryStandC3Board()
         : boot_button_(GPIO_NUM_9, false) {
 
-        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.2");
+        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.4");
 
         InitializeI2C();
         InitializeDisplay();
@@ -958,6 +1076,7 @@ public:
 
                         ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
 
+                        ct_state = ColorTalesState::CT_OFF;
                         Application::GetInstance().EndConversation();
 
                         break;
@@ -981,29 +1100,51 @@ public:
                     //--------------------------------------------------------------
                     // HMB|TEC ColorTales – Aktivierung über ON-Taste
                     //--------------------------------------------------------------
-                    case IR_NEC_ON:
-                    {
-                        ESP_LOGI(TAG,
-                                "COLORTALES: ON erkannt, Farbe=0x%02X",
-                                ir_selected_color);
+                    case IR_NEC_ON: {
+                        const bool white = (ir_selected_color == IR_NEC_WEISS);
+                        const bool resume = (ct_state == ColorTalesState::CT_PAUSED);
+                        const char* character = GetColorTalesCharacter(ir_selected_color);
 
-                        // Charakter-Jingle: zunächst Drago als Test
-                        Application::GetInstance().PlaySound(
-                            std::string_view(
-                                drago_ogg_start,
-                                drago_ogg_end - drago_ogg_start
-                            )
-                        );
+                        // WEISS ist der neutrale Story-Start und darf ON nicht blockieren.
+                        if (!white && !character) {
+                            ESP_LOGW(TAG, "COLORTALES: Keine Figur fuer %s",
+                                     GetSelectedColorName(ir_selected_color));
+                            break;
+                        }
 
-                        // XiaoZhi-Dialog starten
-                        Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            UpdateLampPixels(ir_selected_color);
+                        #endif
 
-                        ESP_LOGI(TAG, "COLORTALES: XiaoZhi-Dialog angefordert");
+                        ct_active_color = ir_selected_color;
+                        ct_state = ColorTalesState::CT_ACTIVE;
+
+                        ESP_LOGI(TAG, "COLORTALES: %s Figur=%s",
+                                 resume ? "FORTSETZUNG" : "START",
+                                 white ? "ERZAEHLER (WEISS)" : character);
+
+                        // Nach WEISS-Pause die bisherige Geschichte fortsetzen.
+                        // Beim ersten ON nach Reset mit WEISS eine neue Geschichte starten.
+                        if (resume) {
+                            //! Application::GetInstance().WakeWordInvoke("HMBCOLORTALESWECHSEL", false);
+                        } else {
+                            if (ir_selected_color == IR_NEC_RED) {
+                                Application::GetInstance().PlaySound(
+                                    std::string_view(drago_ogg_start,
+                                                     drago_ogg_end - drago_ogg_start));
+                            }
+                            Application::GetInstance().WakeWordInvoke(
+                                "HMBCOLORTALES", false);
+                        }
                         break;
                     }
                     //--------------------------------------------------------------  
                     case IR_NEC_FLASH:
                     //-------------------------------------------------------------
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            UpdateLampPixels(ir_selected_color);
+                        #endif
+
                         ESP_LOGI(TAG,
                                 "AFFIRMATION: FLASH erkannt, Farbe=0x%02X",
                                 ir_selected_color);
@@ -1014,6 +1155,7 @@ public:
                         SendIrCommand(ir_selected_color);
                         ESP_LOGI(TAG, "AFFIRMATION: Farbe wiederhergestellt");
 
+                        // XiaoZhi-Dialog NICHT starten
                         Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
 
                         ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
@@ -1021,6 +1163,10 @@ public:
                     //-------------------------------------------------------------        
                     case IR_NEC_STROBE:
                     //-------------------------------------------------------------
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            UpdateLampPixels(ir_selected_color);
+                        #endif
+
                         ESP_LOGI(TAG,
                                  "SEELSORGE: STROBE erkannt, Farbe=0x%02X",
                                  ir_selected_color);
@@ -1048,6 +1194,7 @@ public:
                                  "ERINNERUNG: FADE erkannt, Farbkontext=0x%02X",
                                  ir_selected_color);
 
+                        // XiaoZhi-Dialog starten
                         Application::GetInstance().WakeWordInvoke(
                             "HMBERINNERUNG", false
                         );
@@ -1064,6 +1211,7 @@ public:
                                  "ACHTSAMKEIT: SMOOTH erkannt, Farbkontext=0x%02X",
                                  ir_selected_color);
 
+                        // XiaoZhi-Dialog starten
                         Application::GetInstance().WakeWordInvoke(
                             "HMBACHTSAMKEIT", false
                         );

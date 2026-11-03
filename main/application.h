@@ -111,6 +111,7 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
+    void ColorTalesSwitch(); // Test: Wakeword in bestehender MQTT-Sitzung
     void RegisterOneShotFinishedCallback(std::function<void()> callback);
     void RegisterSttCallback(std::function<void(const std::string&)> callback);
     int RegisterStateChangeListener(std::function<void(DeviceState, DeviceState)> callback);

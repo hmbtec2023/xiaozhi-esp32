@@ -2367,6 +2367,18 @@ int Application::RegisterStateChangeListener(std::function<void(DeviceState, Dev
     return state_machine_.AddStateChangeListener(std::move(callback));
 }
 
+// HMB|TEC ColorTales V0.9.5: experimenteller In-Session-Trigger.
+void Application::ColorTalesSwitch() {
+    Schedule([this]() {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            ESP_LOGI(TAG, "ColorTales: sende In-Session-Figurenwechsel");
+            protocol_->SendWakeWordDetected("HMBCOLORTALESWECHSEL");
+        } else {
+            ESP_LOGW(TAG, "ColorTales: kein offener Audiokanal, Wechsel nicht gesendet");
+        }
+    });
+}
+
 void Application::WakeWordInvoke(
     const std::string& wake_word,
     bool manual_stop) {
