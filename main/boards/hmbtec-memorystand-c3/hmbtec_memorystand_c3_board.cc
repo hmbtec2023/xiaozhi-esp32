@@ -39,6 +39,10 @@
 #include "device_state_machine.h"
 #include "led_strip_spi.h"
 
+#define PIXEL_MODE_STATUS  0
+#define PIXEL_MODE_LAMP    1
+#define HMB_PIXEL_MODE PIXEL_MODE_LAMP  // STATUS oder LAMP
+
 #define STATUS_NEOPIXEL_GPIO        8
 #define STATUS_NEOPIXEL_COUNT      16
 #define STATUS_NEOPIXEL_BRIGHTNESS 40
@@ -198,6 +202,106 @@ static void StatusPixelFill(uint8_t r, uint8_t g, uint8_t b) {
     led_strip_refresh(status_strip);
 }
 
+static void UpdateLampPixels(uint8_t command) {
+
+    switch (command) {
+
+        // ========================================
+        // Reihe 1 – Grundfarben
+        // ========================================
+
+        case IR_NEC_RED:
+            StatusPixelFill(40, 0, 0);
+            break;
+
+        case IR_NEC_GREEN:
+            StatusPixelFill(0, 40, 0);
+            break;
+
+        case IR_NEC_BLUE:
+            StatusPixelFill(0, 0, 40);
+            break;
+
+        case IR_NEC_WEISS:
+            StatusPixelFill(40, 40, 40);
+            break;
+
+
+        // ========================================
+        // Reihe 2 – Helle Farbvarianten
+        // ========================================
+
+        case IR_NEC_RED_1:
+            StatusPixelFill(40, 5, 3);
+            break;
+
+        case IR_NEC_GREEN_1:
+            StatusPixelFill(5, 40, 8);
+            break;
+
+        case IR_NEC_BLUE_1:
+            StatusPixelFill(5, 15, 40);
+            break;
+
+
+        // ========================================
+        // Reihe 3 – Orange / Cyan / Violett
+        // ========================================
+
+        case IR_NEC_ORANGE:
+            StatusPixelFill(40, 12, 0);
+            break;
+
+        case IR_NEC_CYAN:
+            StatusPixelFill(0, 40, 40);
+            break;
+
+        case IR_NEC_PURPLE:
+            StatusPixelFill(25, 0, 40);
+            break;
+
+
+        // ========================================
+        // Reihe 4 – Weitere Farbvarianten
+        // ========================================
+
+        case IR_NEC_RED_2:
+            StatusPixelFill(40, 20, 0);
+            break;
+
+        case IR_NEC_GREEN_2:
+            StatusPixelFill(0, 25, 40);
+            break;
+
+        case IR_NEC_BLUE_2:
+            StatusPixelFill(35, 0, 25);
+            break;
+
+
+        // ========================================
+        // Reihe 5 – Gelb / Dunkelblau / Magenta
+        // ========================================
+
+        case IR_NEC_YELLOW:
+            StatusPixelFill(40, 40, 0);
+            break;
+
+        case IR_NEC_GREEN_3:
+            StatusPixelFill(0, 12, 35);
+            break;
+
+        case IR_NEC_BLUE_3:
+            StatusPixelFill(40, 0, 25);
+            break;
+
+        default:
+            ESP_LOGW(TAG,
+                     "NeoPixel: Unbekannter Farbcode 0x%02X",
+                     command);
+            break;
+    }
+}
+
 static void InitializeStatusPixels() {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = STATUS_NEOPIXEL_GPIO;
@@ -222,7 +326,11 @@ static void InitializeStatusPixels() {
     }
 
     led_strip_clear(status_strip);
-    StatusPixelFill(10, 10, 10);
+    #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+        UpdateLampPixels(ir_selected_color);
+    #else
+        StatusPixelFill(10, 10, 10);
+    #endif
 
     ESP_LOGI(TAG, "NeoPixel SPI: %d LEDs an GPIO%d bereit",
              STATUS_NEOPIXEL_COUNT,
@@ -259,6 +367,9 @@ static void RegisterLightMcpTools() {
 
             ir_selected_color = command;
             SendIrCommand(command);
+            #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                UpdateLampPixels(command);
+            #endif
 
             return std::string("Lichtfarbe gesetzt");
         }
@@ -472,30 +583,37 @@ return std::string(
 }
 
 static void UpdateStatusPixels(DeviceState state) {
+
+#if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+
     switch (state) {
         case kDeviceStateIdle:
-            StatusPixelFill(10, 10, 10);   // Weiß
+            StatusPixelFill(10, 10, 10);
             break;
 
         case kDeviceStateListening:
-            StatusPixelFill(0, 0, 40);     // Blau
+            StatusPixelFill(0, 0, 40);
             break;
 
         case kDeviceStateSpeaking:
-            StatusPixelFill(0, 40, 0);     // Grün
+            StatusPixelFill(0, 40, 0);
             break;
 
         case kDeviceStateConnecting:
-            StatusPixelFill(40, 20, 0);    // Orange
+            StatusPixelFill(40, 20, 0);
             break;
 
         case kDeviceStateFatalError:
-            StatusPixelFill(40, 0, 0);     // Rot
+            StatusPixelFill(40, 0, 0);
             break;
 
         default:
             break;
     }
+
+#else
+    (void)state;
+#endif
 }
 
 class HmbtecMemoryStandC3Board : public WifiBoard {
@@ -649,16 +767,33 @@ public:
                     case IR_NEC_YELLOW:
                     case IR_NEC_WEISS:
                         ir_selected_color = command;
+
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            UpdateLampPixels(command);
+                        #endif
+
                         ESP_LOGI(TAG, "IR FARBE gespeichert: 0x%02X", command);
                         break;
                     // ==========================================
                     // OFF – KI-Dialog vollständig beenden
                     // ==========================================
                     case IR_NEC_OFF:
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            StatusPixelFill(5, 5, 5);
+                        #endif
+
                         ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
 
                         Application::GetInstance().EndConversation();
 
+                        break;
+                    // ==========================================
+                    // ON – nur Pixel auf letzte Farbe
+                    // ==========================================
+                    case IR_NEC_ON:
+                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                            UpdateLampPixels(ir_selected_color);
+                        #endif
                         break;
                     // ==========================================
                     // UP / DOWN – XiaoZhi-Audiolautstärke
