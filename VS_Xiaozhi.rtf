@@ -5,7 +5,7 @@
 \red46\green111\blue253;\red217\green11\blue5;}
 {\*\expandedcolortbl;;\csgray\c0;\cssrgb\c48169\c12809\c62212;\cssrgb\c0\c38136\c99824;
 \cssrgb\c22750\c53231\c99501;\cssrgb\c88946\c14202\c0;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww13200\viewh12880\viewkind0
+\paperw11900\paperh16840\margl1440\margr1440\vieww13240\viewh12880\viewkind0
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
 
 \f0\b\fs36 \cf2 \CocoaLigature0 ls /dev/cu.*\
@@ -80,7 +80,10 @@ python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before defa
 sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+\cf6 MP3 -> OGG\cf2 :\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
 
-\f4\b0 \
+\f4\b0 ffmpeg -i drago.mp3 -c:a libopus -b:a 32k -ar 48000 -ac 1 drago.ogg\
+\
 }

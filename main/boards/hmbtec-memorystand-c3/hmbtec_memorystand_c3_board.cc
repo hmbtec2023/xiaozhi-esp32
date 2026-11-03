@@ -39,6 +39,7 @@
 #include "led_strip.h"
 #include "device_state_machine.h"
 #include "led_strip_spi.h"
+#include "assets/lang_config.h"
 
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
@@ -49,6 +50,9 @@
 #define STATUS_NEOPIXEL_BRIGHTNESS 40
 
 #define TAG "HMBMemoryStandC3"
+
+extern const char drago_ogg_start[] asm("_binary_drago_ogg_start");
+extern const char drago_ogg_end[]   asm("_binary_drago_ogg_end");
 
 static constexpr uint16_t IR_NEC_ADDRESS  = 0x0000; // 0xEF00; // Extended NEC, 16-Bit-Adresse
 static constexpr uint8_t IR_NEC_RED       = 0x19;
@@ -414,6 +418,7 @@ static void RegisterLightMcpTools() {
             return std::string("Lichtfarbe gesetzt");
         }
     );
+    
     mcp.AddTool(
         "self.hmbtec.get_affirmation",
         "When the user input is exactly HMBPROMPT, "
@@ -432,6 +437,65 @@ static void RegisterLightMcpTools() {
             "Keine Rueckfragen, keine Erklaerungen.";
         }
     );
+    
+    //--- HMB|TEC ColorTales – Character Engine V0.2
+    mcp.AddTool(
+        "self.hmbtec.get_colortale",
+        "When the user input is exactly HMBPROMPT, "
+        "always call this tool. Execute the returned instruction. "
+        "Do not mention the trigger or tool.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+
+            const std::string color =
+                GetSelectedColorName(ir_selected_color);
+
+            std::string persona;
+
+            if (color == "Rot") {
+                persona =
+                    "Du bist DRAGO, ein alter, maechtiger, "
+                    "aber freundlicher Drache. "
+                    "Sprich ruhig, geheimnisvoll und weise. "
+                    "Du liebst fantastische Abenteuer. ";
+            }
+            else if (color == "Blau") {
+                persona =
+                    "Du bist FINN, ein junger, neugieriger Delfin. "
+                    "Sprich lebhaft, freundlich und verspielt. "
+                    "Du liebst Meeresabenteuer. ";
+            }
+            else if (color == "Gruen") {
+                persona =
+                    "Du bist LILLI, eine kluge, freundliche Eule. "
+                    "Sprich ruhig, warm und einfu ehlsam. "
+                    "Du liebst Raetsel und Entdeckungen. ";
+            }
+            else if (color == "Gelb") {
+                persona =
+                    "Du bist FIPS, ein frecher, lustiger Fuchs. "
+                    "Sprich lebhaft, humorvoll und neugierig. "
+                    "Du liebst spannende Waldabenteuer. ";
+            }
+            else {
+                persona =
+                    "Du bist ein freundlicher Geschichtenerzaehler. ";
+            }
+
+            return
+                persona +
+                "Du bist eine interaktive Geschichtenfigur "
+                "fuer Kinder. "
+                "Bleibe waehrend des gesamten Gespraechs "
+                "in deiner Rolle. "
+                "Sprich in kurzen, altersgerechten Saetzen. "
+                "Beginne mit einer kurzen Begruessung "
+                "und frage das Kind, welches Abenteuer "
+                "es heute erleben moechte. "
+                "Warte anschliessend auf seine Antwort.";
+        }
+    );
+
     mcp.AddTool(
         "self.hmbtec.start_seelsorge",
         "When the user input is exactly HMBSEELSORGE, "
@@ -646,14 +710,18 @@ private:
         const float rn = static_cast<float>(r) / sum;
         const float gn = static_cast<float>(g) / sum;
         const float bn = static_cast<float>(b) / sum;
+
         //if (rn > 0.40f && gn > 0.28f && bn < 0.22f) command = IR_NEC_YELLOW;
         if (rn > 0.3f && gn > 0.28f && bn < 0.22f) command = IR_NEC_YELLOW;
-        else if (rn > 0.49f && gn > 0.19f && bn < 0.20f) command = IR_NEC_ORANGE;
+
         //else if (rn > 0.48f && rn > gn * 1.45f && rn > bn * 1.45f) command = IR_NEC_RED;
         else if (rn > 0.35f &&
                 rn > gn * 1.1f &&
                 rn > bn * 1.1f)
             command = IR_NEC_RED;
+
+        else if (rn > 0.49f && gn > 0.19f && bn < 0.20f) command = IR_NEC_ORANGE;
+
         else if (gn > 0.43f && gn > rn * 1.25f && gn > bn * 1.20f) command = IR_NEC_GREEN;
         else if (bn > 0.43f && bn > rn * 1.25f && bn > gn * 1.20f) command = IR_NEC_BLUE;
         else if (gn > rn * 1.20f && bn > rn * 1.20f) command = IR_NEC_CYAN;
@@ -894,14 +962,6 @@ public:
 
                         break;
                     // ==========================================
-                    // ON – nur Pixel auf letzte Farbe
-                    // ==========================================
-                    case IR_NEC_ON:
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            UpdateLampPixels(ir_selected_color);
-                        #endif
-                        break;
-                    // ==========================================
                     // UP / DOWN – XiaoZhi-Audiolautstärke
                     // ==========================================
                     case IR_NEC_UP:
@@ -918,6 +978,29 @@ public:
                         ESP_LOGI(TAG, "AUDIO: Lautstaerke = %d%%", volume);
                         break;
                     }
+                    //--------------------------------------------------------------
+                    // HMB|TEC ColorTales – Aktivierung über ON-Taste
+                    //--------------------------------------------------------------
+                    case IR_NEC_ON:
+                    {
+                        ESP_LOGI(TAG,
+                                "COLORTALES: ON erkannt, Farbe=0x%02X",
+                                ir_selected_color);
+
+                        // Charakter-Jingle: zunächst Drago als Test
+                        Application::GetInstance().PlaySound(
+                            std::string_view(
+                                drago_ogg_start,
+                                drago_ogg_end - drago_ogg_start
+                            )
+                        );
+
+                        // XiaoZhi-Dialog starten
+                        Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
+
+                        ESP_LOGI(TAG, "COLORTALES: XiaoZhi-Dialog angefordert");
+                        break;
+                    }
                     //--------------------------------------------------------------  
                     case IR_NEC_FLASH:
                     //-------------------------------------------------------------
@@ -930,7 +1013,9 @@ public:
                         vTaskDelay(pdMS_TO_TICKS(500));
                         SendIrCommand(ir_selected_color);
                         ESP_LOGI(TAG, "AFFIRMATION: Farbe wiederhergestellt");
+
                         Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
+
                         ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
                         break;
                     //-------------------------------------------------------------        
