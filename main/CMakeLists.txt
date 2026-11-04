@@ -1043,6 +1043,23 @@ if(NOT LANG_DIR STREQUAL "en-US")
     endforeach()
 endif()
 
+# HMB|TEC ColorTales: feste relative Embed-Pfade fuer stabile Linker-Symbole.
+# Die normalen XiaoZhi-Sprachsounds bleiben unveraendert.
+set(HMB_COLORTALES_EMBED_FILES "")
+if(CONFIG_BOARD_TYPE_HMBTEC_MEMORYSTAND_C3)
+    foreach(HMB_SOUND_NAME DINO SPACE MAGIC NATURE DETECTIVE STORY)
+        set(HMB_SOUND_REL "assets/locales/de-DE/${HMB_SOUND_NAME}.ogg")
+        set(HMB_SOUND_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${HMB_SOUND_REL}")
+        if(NOT EXISTS "${HMB_SOUND_ABS}")
+            message(FATAL_ERROR "ColorTales Sound fehlt: ${HMB_SOUND_ABS}")
+        endif()
+        # Absolute GLOB-Eintraege entfernen, um doppelte Einbettung zu vermeiden.
+        list(REMOVE_ITEM LANG_SOUNDS "${HMB_SOUND_ABS}")
+        list(APPEND HMB_COLORTALES_EMBED_FILES "${HMB_SOUND_REL}")
+    endforeach()
+    message(STATUS "HMB ColorTales: 6 OGG-Dateien werden relativ eingebettet")
+endif()
+
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 
 # If target chip is ESP32, exclude specific files to avoid build errors
@@ -1100,7 +1117,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${HMB_COLORTALES_EMBED_FILES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES

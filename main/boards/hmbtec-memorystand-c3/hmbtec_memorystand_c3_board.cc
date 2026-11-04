@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.9.4
+ * PROJECT_VERSION: 0.9.8
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -44,15 +44,50 @@
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
 #define HMB_PIXEL_MODE PIXEL_MODE_LAMP  // STATUS oder LAMP
+#define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
 
 #define STATUS_NEOPIXEL_GPIO        8
 #define STATUS_NEOPIXEL_COUNT      16
 #define STATUS_NEOPIXEL_BRIGHTNESS 40
 
 #define TAG "HMBMemoryStandC3"
+#define HMB_COLORTALES_SOUNDS 1
 
-extern const char drago_ogg_start[] asm("_binary_drago_ogg_start");
-extern const char drago_ogg_end[]   asm("_binary_drago_ogg_end");
+// ============================================================
+// HMB|TEC ColorTales V0.9.9
+// OGG-Sounds – ESP-IDF EMBED_FILES
+// Symbolnamen anhand riscv32-esp-elf-nm korrigiert
+// ============================================================
+
+extern const char dino_ogg_start[]
+    asm("_binary_DINO_ogg_start");
+extern const char dino_ogg_end[]
+    asm("_binary_DINO_ogg_end");
+
+extern const char space_ogg_start[]
+    asm("_binary_SPACE_ogg_start");
+extern const char space_ogg_end[]
+    asm("_binary_SPACE_ogg_end");
+
+extern const char magic_ogg_start[]
+    asm("_binary_MAGIC_ogg_start");
+extern const char magic_ogg_end[]
+    asm("_binary_MAGIC_ogg_end");
+
+extern const char detective_ogg_start[]
+    asm("_binary_DETECTIVE_ogg_start");
+extern const char detective_ogg_end[]
+    asm("_binary_DETECTIVE_ogg_end");
+
+extern const char story_ogg_start[]
+    asm("_binary_STORY_ogg_start");
+extern const char story_ogg_end[]
+    asm("_binary_STORY_ogg_end");
+
+extern const char nature_ogg_start[]
+    asm("_binary_NATURE_ogg_start");
+extern const char nature_ogg_end[]
+    asm("_binary_NATURE_ogg_end");
 
 static constexpr uint16_t IR_NEC_ADDRESS  = 0x0000; // 0xEF00; // Extended NEC, 16-Bit-Adresse
 static constexpr uint8_t IR_NEC_RED       = 0x19;
@@ -105,12 +140,83 @@ static const char* GetColorTalesCharacter(uint8_t color) {
     switch (color) {
         case IR_NEC_RED:    return "DRAGO";
         case IR_NEC_BLUE:   return "FINN";
-        case IR_NEC_GREEN:  return "LILLI";
+        case IR_NEC_GREEN:
+        case IR_NEC_GREEN_1: return "LILLI";
         case IR_NEC_YELLOW: return "FIPS";
         default:            return nullptr;
     }
 }
 
+// ============================================================
+// HMB|TEC ColorTales – Figurensound
+// ============================================================
+
+static void PlayColorTalesSound(uint8_t color) {
+
+#if HMB_COLORTALES_SOUNDS
+
+    const char* start = nullptr;
+    const char* end   = nullptr;
+    const char* name  = nullptr;
+
+    switch (color) {
+
+        case IR_NEC_RED:
+            start = dino_ogg_start;
+            end   = dino_ogg_end;
+            name  = "DRAGO";
+            break;
+
+        case IR_NEC_BLUE:
+            start = space_ogg_start;
+            end   = space_ogg_end;
+            name  = "FINN";
+            break;
+
+        case IR_NEC_GREEN:
+            start = magic_ogg_start;
+            end   = magic_ogg_end;
+            name  = "LILLI";
+            break;
+
+        case IR_NEC_GREEN_1:
+            start = nature_ogg_start;
+            end   = nature_ogg_end;
+            name  = "LILLI (NATURE)";
+            break;
+
+        case IR_NEC_YELLOW:
+            start = detective_ogg_start;
+            end   = detective_ogg_end;
+            name  = "FIPS";
+            break;
+
+        case IR_NEC_WEISS:
+            start = story_ogg_start;
+            end   = story_ogg_end;
+            name  = "STORY";
+            break;
+
+        default:
+            return;
+    }
+
+    if (!start || !end || end <= start) {
+        ESP_LOGW(TAG, "COLORTALES: Sound ungueltig");
+        return;
+    }
+
+    ESP_LOGI(TAG,
+             "COLORTALES SOUND: %s (%u Bytes)",
+             name,
+             static_cast<unsigned>(end - start));
+
+    Application::GetInstance().PlaySound(
+        std::string_view(start, end - start)
+    );
+
+#endif
+}
 
 static void InitializeIrTransmitter() {
     #if HMB_IR_ENABLED
@@ -433,6 +539,9 @@ static void SetSelectedColor(uint8_t command, bool send_ir) {
              resume ? "FORTSETZUNG" : "FIGURENWECHSEL",
              character);
 
+    // Erkennungssound der neuen Figur
+    PlayColorTalesSound(command);
+
     // Bestehenden Gesprächskontext möglichst erhalten
     Application::GetInstance().ColorTalesSwitch();
 
@@ -554,7 +663,8 @@ static void RegisterLightMcpTools() {
                     "Sprich lebhaft, freundlich und verspielt. "
                     "Du liebst Meeresabenteuer. ";
             }
-            else if (color == "Gruen") {
+            else if (ir_selected_color == IR_NEC_GREEN ||
+                     ir_selected_color == IR_NEC_GREEN_1) {
                 persona =
                     "Du bist LILLI, eine kluge, freundliche Eule. "
                     "Sprich ruhig, warm und einfuehlsam. "
@@ -1026,7 +1136,7 @@ public:
     HmbtecMemoryStandC3Board()
         : boot_button_(GPIO_NUM_9, false) {
 
-        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.4");
+        ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.7");
 
         InitializeI2C();
         InitializeDisplay();
@@ -1126,13 +1236,10 @@ public:
                         // Nach WEISS-Pause die bisherige Geschichte fortsetzen.
                         // Beim ersten ON nach Reset mit WEISS eine neue Geschichte starten.
                         if (resume) {
+                            PlayColorTalesSound(ir_selected_color);
                             //! Application::GetInstance().WakeWordInvoke("HMBCOLORTALESWECHSEL", false);
                         } else {
-                            if (ir_selected_color == IR_NEC_RED) {
-                                Application::GetInstance().PlaySound(
-                                    std::string_view(drago_ogg_start,
-                                                     drago_ogg_end - drago_ogg_start));
-                            }
+                            PlayColorTalesSound(ir_selected_color);
                             Application::GetInstance().WakeWordInvoke(
                                 "HMBCOLORTALES", false);
                         }
