@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.9.8 (OLED optional)
+ * PROJECT_VERSION: 0.9.11
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -19,6 +19,7 @@
 #include "wifi_board.h"
 #include "codecs/no_audio_codec.h"
 #include "display/oled_display.h"
+#include "display/display.h"
 #include "config.h"
 
 #include <esp_log.h>
@@ -44,8 +45,11 @@
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
 #define HMB_PIXEL_MODE PIXEL_MODE_LAMP  // STATUS oder LAMP
+//-----------------------------------------------------------------------------
+#define HMB_COLORTALES_ENABLED  0  // 1=ColorTales aktiv, 0=deaktiviert 
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
-#define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv, 0=Sensor deaktiviert
+//-----------------------------------------------------------------------------
+#define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv (für ColorTales), 0=Sensor deaktiviert
 #define HMB_OLED_ENABLED      0  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
 #define HMB_IR_TX_CARRIER_ENABLED  0  // 1=38 kHz, 0=unmoduliertes NEC (FET direkt an IR-RX der Lampe)
 
@@ -54,10 +58,9 @@
 #define STATUS_NEOPIXEL_BRIGHTNESS 40
 
 #define TAG "HMBMemoryStandC3"
-#define HMB_COLORTALES_SOUNDS 1
 
 // ============================================================
-// HMB|TEC ColorTales V0.9.10
+// HMB|TEC ColorTales
 // OGG-Sounds – ESP-IDF EMBED_FILES
 // Symbolnamen anhand riscv32-esp-elf-nm korrigiert
 // ============================================================
@@ -498,7 +501,13 @@ static void SetSelectedColor(uint8_t command, bool send_ir) {
              command,
              send_ir ? "JA" : "NEIN");
 
-    // Außerhalb von ColorTales nur die Lichtfarbe ändern
+    // ColorTales deaktiviert:
+    // Farbauswahl, NeoPixel und IR bleiben funktionsfähig.
+    #if !HMB_COLORTALES_ENABLED
+        return;
+    #endif
+
+    // ColorTales aktiviert, aber keine Geschichte gestartet
     if (ct_state == ColorTalesState::CT_OFF) {
         return;
     }
@@ -645,7 +654,7 @@ static void RegisterLightMcpTools() {
             "Keine Rueckfragen, keine Erklaerungen.";
         }
     );
-    
+    #if HMB_COLORTALES_ENABLED
     //--- HMB|TEC ColorTales – Character Engine V0.2
     mcp.AddTool(
         "self.hmbtec.get_colortale",
@@ -733,6 +742,7 @@ static void RegisterLightMcpTools() {
                 "frage knapp, was zuletzt geschehen ist.";
         }
     );
+    #endif // HMB_COLORTALES_ENABLED
 
     mcp.AddTool(
         "self.hmbtec.start_seelsorge",
@@ -1205,10 +1215,15 @@ public:
                             StatusPixelFill(5, 5, 5);
                         #endif
 
-                        ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
-
-                        ct_state = ColorTalesState::CT_OFF;
-                        Application::GetInstance().EndConversation();
+                        #if HMB_COLORTALES_ENABLED
+                            ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
+                            ct_state = ColorTalesState::CT_OFF;
+                            Application::GetInstance().EndConversation();
+                        #else
+                            SendIrCommand(IR_NEC_OFF);
+                            ESP_LOGI(TAG, "KI: Bereitschaftszustand -> IDLE");
+                            Application::GetInstance().EndConversation();
+                        #endif
 
                         break;
                     // ==========================================
@@ -1232,38 +1247,48 @@ public:
                     // HMB|TEC ColorTales – Aktivierung über ON-Taste
                     //--------------------------------------------------------------
                     case IR_NEC_ON: {
-                        const bool white = (ir_selected_color == IR_NEC_WEISS);
-                        const bool resume = (ct_state == ColorTalesState::CT_PAUSED);
-                        const char* character = GetColorTalesCharacter(ir_selected_color);
-
-                        // WEISS ist der neutrale Story-Start und darf ON nicht blockieren.
-                        if (!white && !character) {
-                            ESP_LOGW(TAG, "COLORTALES: Keine Figur fuer %s",
-                                     GetSelectedColorName(ir_selected_color));
-                            break;
-                        }
-
                         #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
                             UpdateLampPixels(ir_selected_color);
                         #endif
 
-                        ct_active_color = ir_selected_color;
-                        ct_state = ColorTalesState::CT_ACTIVE;
+                        #if HMB_COLORTALES_ENABLED
+                            const bool white = (ir_selected_color == IR_NEC_WEISS);
+                            const bool resume = (ct_state == ColorTalesState::CT_PAUSED);
+                            const char* character = GetColorTalesCharacter(ir_selected_color);
 
-                        ESP_LOGI(TAG, "COLORTALES: %s Figur=%s",
-                                 resume ? "FORTSETZUNG" : "START",
-                                 white ? "ERZAEHLER (WEISS)" : character);
+                            // WEISS ist der neutrale Story-Start und darf ON nicht blockieren.
+                            if (!white && !character) {
+                                ESP_LOGW(TAG, "COLORTALES: Keine Figur fuer %s",
+                                        GetSelectedColorName(ir_selected_color));
+                                break;
+                            }
 
-                        // Nach WEISS-Pause die bisherige Geschichte fortsetzen.
-                        // Beim ersten ON nach Reset mit WEISS eine neue Geschichte starten.
-                        if (resume) {
-                            PlayColorTalesSound(ir_selected_color);
-                            //! Application::GetInstance().WakeWordInvoke("HMBCOLORTALESWECHSEL", false);
-                        } else {
-                            PlayColorTalesSound(ir_selected_color);
-                            Application::GetInstance().WakeWordInvoke(
-                                "HMBCOLORTALES", false);
-                        }
+                            #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
+                                UpdateLampPixels(ir_selected_color);
+                            #endif
+
+                            ct_active_color = ir_selected_color;
+                            ct_state = ColorTalesState::CT_ACTIVE;
+
+                            ESP_LOGI(TAG, "COLORTALES: %s Figur=%s",
+                                    resume ? "FORTSETZUNG" : "START",
+                                    white ? "ERZAEHLER (WEISS)" : character);
+
+                            // Nach WEISS-Pause die bisherige Geschichte fortsetzen.
+                            // Beim ersten ON nach Reset mit WEISS eine neue Geschichte starten.
+                            if (resume) {
+                                PlayColorTalesSound(ir_selected_color);
+                                //! Application::GetInstance().WakeWordInvoke("HMBCOLORTALESWECHSEL", false);
+                            } else {
+                                PlayColorTalesSound(ir_selected_color);
+                                Application::GetInstance().WakeWordInvoke(
+                                    "HMBCOLORTALES", false);
+                            }
+                        #else
+                            ESP_LOGI(TAG, "IR ON: ColorTales deaktiviert");
+                            ESP_LOGI(TAG, "KI: Bereitschaftszustand -> IDLE");
+                            Application::GetInstance().EndConversation();
+                        #endif
                         break;
                     }
                     //--------------------------------------------------------------  
