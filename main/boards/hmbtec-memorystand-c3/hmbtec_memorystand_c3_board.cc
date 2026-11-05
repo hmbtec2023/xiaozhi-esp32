@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.9.8
+ * PROJECT_VERSION: 0.9.8 (OLED optional)
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -45,6 +45,9 @@
 #define PIXEL_MODE_LAMP    1
 #define HMB_PIXEL_MODE PIXEL_MODE_LAMP  // STATUS oder LAMP
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
+#define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv, 0=Sensor deaktiviert
+#define HMB_OLED_ENABLED      0  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
+#define HMB_IR_TX_CARRIER_ENABLED  0  // 1=38 kHz, 0=unmoduliertes NEC (FET direkt an IR-RX der Lampe)
 
 #define STATUS_NEOPIXEL_GPIO        8
 #define STATUS_NEOPIXEL_COUNT      16
@@ -54,7 +57,7 @@
 #define HMB_COLORTALES_SOUNDS 1
 
 // ============================================================
-// HMB|TEC ColorTales V0.9.9
+// HMB|TEC ColorTales V0.9.10
 // OGG-Sounds – ESP-IDF EMBED_FILES
 // Symbolnamen anhand riscv32-esp-elf-nm korrigiert
 // ============================================================
@@ -229,12 +232,19 @@ static void InitializeIrTransmitter() {
         esp_err_t err = rmt_new_tx_channel(&tx_config, &ir_tx_channel);
         if (err != ESP_OK) { ESP_LOGE(TAG, "IR RMT TX: %s", esp_err_to_name(err)); return; }
 
-        rmt_carrier_config_t carrier = {};
-        carrier.frequency_hz = 38000;
-        carrier.duty_cycle = 0.33f;
-        carrier.flags.polarity_active_low = false;
-        err = rmt_apply_carrier(ir_tx_channel, &carrier);
-        if (err != ESP_OK) { ESP_LOGE(TAG, "IR carrier: %s", esp_err_to_name(err)); return; }
+        #if HMB_IR_TX_CARRIER_ENABLED
+            rmt_carrier_config_t carrier = {};
+            carrier.frequency_hz = 38000;
+            carrier.duty_cycle = 0.33f;
+            carrier.flags.polarity_active_low = false;
+
+            err = rmt_apply_carrier(ir_tx_channel, &carrier);
+
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "IR carrier: %s", esp_err_to_name(err));
+                return;
+            }
+        #endif
 
         rmt_copy_encoder_config_t encoder_config = {};
         err = rmt_new_copy_encoder(&encoder_config, &ir_copy_encoder);
@@ -1138,9 +1148,20 @@ public:
 
         ESP_LOGI(TAG, "HMBTEC MemoryStand C3 V0.9.7");
 
+#if HMB_OLED_ENABLED || HMB_TCS34725_ENABLED
         InitializeI2C();
+#endif
+#if HMB_OLED_ENABLED
         InitializeDisplay();
+#else
+        display_ = new NoDisplay();
+        ESP_LOGI(TAG, "SSD1306 per #define deaktiviert: NoDisplay aktiv");
+#endif
+#if HMB_TCS34725_ENABLED
         InitializeColorSensor();
+#else
+        ESP_LOGI(TAG, "TCS34725 per #define deaktiviert");
+#endif
 
         // NeoPixel-Anzeige mit XiaoZhi-Zustandsmaschine verbinden
         Application::GetInstance().RegisterStateChangeListener(
@@ -1336,7 +1357,9 @@ public:
                 ESP_LOGI(TAG, "IR RX BEREIT - GPIO%d", static_cast<int>(IR_RX_GPIO));
             }
             InitializeStatusPixels();
+#if HMB_TCS34725_ENABLED
             StartColorScanTask();
+#endif
     }
 
     virtual AudioCodec* GetAudioCodec() override {
