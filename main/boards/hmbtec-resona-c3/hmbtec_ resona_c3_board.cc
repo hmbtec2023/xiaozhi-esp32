@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
- * PROJECT_NAME: HMBTEC_MemoryStand_C3
- * PROJECT_VERSION: 0.9.11
+ * PROJECT_NAME: HMBTEC_Resona_C3
+ * PROJECT_VERSION: 0.1.1
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -10,10 +10,8 @@
  * - INMP441 Mikrofon
  * - MAX98357A Lautsprecher
  * - SSD1306 OLED 128x64, I2C 0x3C
- * - TCS34725 RGBC-Sensor, I2C 0x29 / LED via INT
  *
- * OLED: SDA=20, SCL=21
- * I2S: BCLK=4, WS=5, DIN=6, DOUT=7
+ * BASIS: MemoryStand
  */
 
 #include "wifi_board.h"
@@ -1394,10 +1392,34 @@ public:
                 ESP_LOGI(TAG, "IR RX BEREIT - GPIO%d", static_cast<int>(IR_RX_GPIO));
             }
             InitializeStatusPixels();
+
+            // RESONA – einmaliger Audiotest nach Systemstart
+            xTaskCreate([](void*) {
+                vTaskDelay(pdMS_TO_TICKS(5000));
+
+                ESP_LOGI(TAG, "RESONA: Starte lokalen Audiotest");
+
+                Application::GetInstance().PlaySound(
+                    std::string_view(
+                        story_ogg_start,
+                        story_ogg_end - story_ogg_start
+                    )
+                );
+
+                vTaskDelete(nullptr);
+            }, "resona_audio_test", 4096, nullptr, 2, nullptr);
+
+            g_resona.set_greeting_callback([]() {
+                Application::GetInstance().WakeWordInvoke(
+                    "HMBRESONAGREETING",
+                    false
+                );
+            });
+
             if (!g_resona.begin()) ESP_LOGE(TAG, "RESONA Controller Init fehlgeschlagen");
-#if HMB_TCS34725_ENABLED
-            StartColorScanTask();
-#endif
+            #if HMB_TCS34725_ENABLED
+                        StartColorScanTask();
+            #endif
     }
 
     virtual AudioCodec* GetAudioCodec() override {

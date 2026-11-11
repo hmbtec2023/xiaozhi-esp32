@@ -1,89 +1,15 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2907
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Arial-BoldMT;\f1\fswiss\fcharset0 ArialMT;\f2\fnil\fcharset0 .SFNS-Bold;
-\f3\fnil\fcharset0 .AppleSystemUIFontMonospaced-Semibold;\f4\fnil\fcharset0 Menlo-Regular;}
-{\colortbl;\red255\green255\blue255;\red0\green0\blue0;\red102\green0\blue141;\red5\green68\blue254;
-\red46\green111\blue253;\red217\green11\blue5;}
-{\*\expandedcolortbl;;\csgray\c0;\cssrgb\c48169\c12809\c62212;\cssrgb\c0\c38136\c99824;
-\cssrgb\c22750\c53231\c99501;\cssrgb\c88946\c14202\c0;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww13240\viewh12880\viewkind0
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+BUILD:
+python3 scripts/build.py hmbtec-resona-c3 --name hmbtec-resona-c3 --language de-DE
 
-\f0\b\fs36 \cf2 \CocoaLigature0 ls /dev/cu.*\
-\
-pkill -f 'idf.py'\
-\
-pkill -f 'serial.tools.miniterm'\
-\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
-\cf3 sudo pkill -9 -f 'idf_monitor|esp_idf_monitor'\cf2 \
-\
-cd ~/Documents/xiaozhi-persona-light\
-\
-idf.py build && idf.py -p /dev/cu.usbmodem5A8A0534903 -b 460800 flash\
-\
-touch main/boards/sensecap-watcher/sensecap_watcher.cc\
-idf.py build && idf.py flash\
-\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
-\cf0 \CocoaLigature1 touch main/boards/sensecap-watcher/sensecap_watcher.cc\
-\
-touch main/boards/sensecap-watcher/sscma_camera.cc\
-\pard\pardeftab720\sa240\partightenfactor0
+FLASH:
+python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin
 
-\f1\b0 \cf0 \expnd0\expndtw0\kerning0
-\
+Monitor:
+cd ~/Documents/XIAOZHI && idf.py -p /dev/cu.usbmodem101 monitor
 
-\f0\b bash build_flash.sh\
-\
-Terminal:\
-source /Users/hmb/.espressif/v6.1/esp-idf/export.sh\
-\'97\'97\'97\'97\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
-\cf4 \kerning1\expnd0\expndtw0 \CocoaLigature0 BUILD\cf2 :\
-source ~/.espressif/v6.1/esp-idf/export.sh && cd ~/Documents/XIAOZHI && python3 scripts/build.py m5stack/atoms3-memorystand --name atoms3-memorystand --language de-DE\
-\
-\cf4 FLASH\cf2 :\
-cd ~/Documents/XIAOZHI/build && python3 -m esptool --chip esp32s3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash "@flash_args"\
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 \
-\cf4 \kerning1\expnd0\expndtw0 \CocoaLigature0 Monitor\cf2 :\
-\pard\pardeftab720\sa240\partightenfactor0
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 cd ~/Documents/XIAOZHI && idf.py -p /dev/cu.usbmodem101 monitor\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
-\cf5 \kerning1\expnd0\expndtw0 \CocoaLigature0 KILL\cf2 :\
-sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
-\
-\pard\pardeftab720\sa240\partightenfactor0
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 \'97\'97\'97\'97 
-\f2\fs38 \kerning1\expnd0\expndtw0 Verzeichnis 
-\f3 XIAOZHI
-\f2  ausf\'fchren:
-\f0\fs36 \expnd0\expndtw0\kerning0
-\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
-\cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 BUILD\cf2 :\
-python3 scripts/build.py hmbtec-memorystand-c3 --name hmbtec-memorystand-c3 --language de-DE\
-\
-\cf6 FLASH\cf2 :\
-python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin\
-\
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 \
-\cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 Monitor\cf2 :\
-\pard\pardeftab720\sa240\partightenfactor0
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 cd ~/Documents/XIAOZHI && idf.py -p /dev/cu.usbmodem101 monitor\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
-\cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 KILL\cf2 :\
-sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
-\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
-\cf6 MP3 -> OGG\cf2 :\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+KILL:
+sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9
 
-\f4\b0 ffmpeg -i drago.mp3 -c:a libopus -b:a 32k -ar 48000 -ac 1 drago.ogg\
-\
-}
+MP3 -> OGG:
+ffmpeg -i drago.mp3 -c:a libopus -b:a 32k -ar 48000 -ac 1 drago.ogg
+
