@@ -560,7 +560,7 @@ static void SetSelectedColor(uint8_t command, bool send_ir) {
 
     // Erkennungssound der neuen Figur
     PlayColorTalesSound(command);
-
+    
     // Bestehenden Gesprächskontext möglichst erhalten
     Application::GetInstance().ColorTalesSwitch();
 
@@ -1288,6 +1288,7 @@ public:
                             ESP_LOGI(TAG, "IR ON: ColorTales deaktiviert");
                             ESP_LOGI(TAG, "KI: Bereitschaftszustand -> IDLE");
                             Application::GetInstance().EndConversation();
+                            PlayColorTalesSound(IR_NEC_WEISS);
                         #endif
                         break;
                     }
