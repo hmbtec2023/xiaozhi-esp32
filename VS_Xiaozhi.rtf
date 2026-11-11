@@ -5,7 +5,7 @@
 \red46\green111\blue253;\red217\green11\blue5;}
 {\*\expandedcolortbl;;\csgray\c0;\cssrgb\c48169\c12809\c62212;\cssrgb\c0\c38136\c99824;
 \cssrgb\c22750\c53231\c99501;\cssrgb\c88946\c14202\c0;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww13240\viewh12880\viewkind0
+\paperw11900\paperh16840\margl1440\margr1440\vieww19760\viewh13600\viewkind0
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
 
 \f0\b\fs36 \cf2 \CocoaLigature0 ls /dev/cu.*\
@@ -65,6 +65,8 @@ sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 \cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 BUILD\cf2 :\
 python3 scripts/build.py hmbtec-memorystand-c3 --name hmbtec-memorystand-c3 --language de-DE\
+\
+python3 scripts/build.py hmbtec-resona-c3 --name hmbtec-resona-c3 --language de-DE\
 \
 \cf6 FLASH\cf2 :\
 python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin\
