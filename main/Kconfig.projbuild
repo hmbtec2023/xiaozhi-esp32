@@ -614,6 +614,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_HMBTEC_MEMORYSTAND_C3
         bool "HMB|TEC MemoryStand C3"
         depends on IDF_TARGET_ESP32C3
+    config BOARD_TYPE_HMBTEC_EINSCHLAF_COACH_C3
+        bool "HMB|TEC Einschlaf-Coach C3"
+        depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_HMBTEC_RESONA_C3
         bool "HMB|TEC RESONA AI C3"
         depends on IDF_TARGET_ESP32C3
