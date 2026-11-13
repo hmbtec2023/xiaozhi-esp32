@@ -235,6 +235,19 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
 
     size_t bytes_written;
     ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
+    static uint32_t diag_count = 0;
+    if (++diag_count % 100 == 0) {
+        int32_t peak = 0;
+        for (int i = 0; i < samples; ++i) {
+            int32_t v = data[i];
+            if (v < 0) v = -v;
+            if (v > peak) peak = v;
+        }
+        ESP_LOGI("HMB_AUDIO_DIAG",
+                 "PCM peak=%ld volume=%d samples=%d I2S_written=%u",
+                 (long)peak, output_volume_, samples,
+                 (unsigned)bytes_written);
+    }
     return bytes_written / sizeof(int32_t);
 }
 
@@ -243,7 +256,13 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
     constexpr uint32_t kReadTimeoutMs = 200;
 
     std::vector<int32_t> bit32_buffer(samples);
-    if (i2s_channel_read(rx_handle_, bit32_buffer.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+    esp_err_t err = i2s_channel_read(
+        rx_handle_, bit32_buffer.data(),
+        samples * sizeof(int32_t), &bytes_read, kReadTimeoutMs);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HMB I2S RX FAILED: %s (0x%x)",
+                 esp_err_to_name(err), (unsigned)err);
         return 0;
     }
 

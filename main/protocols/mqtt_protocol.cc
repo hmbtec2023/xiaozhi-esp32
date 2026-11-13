@@ -300,6 +300,8 @@ bool MqttProtocol::OpenAudioChannel() {
     auto network = Board::GetInstance().GetNetwork();
     auto udp = network->CreateUdp(2);
     udp->OnMessage([this](const std::string& data) {
+        ESP_LOGI("HMB_UDP_RAW", "UDP received: %u bytes",
+                 (unsigned)data.size());
         /*
          * UDP Encrypted OPUS Packet Format:
          * |type 1u|flags 1u|payload_len 2u|ssrc 4u|timestamp 4u|sequence 4u|
@@ -363,6 +365,15 @@ bool MqttProtocol::OpenAudioChannel() {
             remote_sequence_ = sequence;
         }
         last_incoming_time_ = std::chrono::steady_clock::now();
+        static uint32_t hmb_rx_count = 0;
+//        if (++hmb_rx_count % 10 == 0) {
+        if (++hmb_rx_count > 0) {
+            ESP_LOGI("HMB_MQTT_AUDIO",
+                     "RX=%lu seq=%lu payload=%u",
+                     (unsigned long)hmb_rx_count,
+                     (unsigned long)sequence,
+                     (unsigned)payload_len);
+        }
         if (on_incoming_audio_ != nullptr) {
             on_incoming_audio_(std::move(packet));
         }
@@ -453,6 +464,9 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
     const std::string udp_server = server->valuestring;
     const int udp_port = port->valueint;
 
+    ESP_LOGI(TAG, "HMB UDP server: %s, port: %d",
+         udp_server.c_str(), udp_port);
+         
     // auto encryption = cJSON_GetObjectItem(udp, "encryption")->valuestring;
     // ESP_LOGI(TAG, "UDP server: %s, port: %d, encryption: %s", udp_server_.c_str(), udp_port_,
     // encryption);

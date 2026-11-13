@@ -50,7 +50,7 @@
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
 //-----------------------------------------------------------------------------
 #define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv (für ColorTales), 0=Sensor deaktiviert
-#define HMB_OLED_ENABLED      0  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
+#define HMB_OLED_ENABLED      1  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
 #define HMB_IR_TX_CARRIER_ENABLED  0  // 1=38 kHz, 0=unmoduliertes NEC (FET direkt an IR-RX der Lampe)
 
 #define STATUS_NEOPIXEL_GPIO        8
@@ -887,8 +887,8 @@ private:
                 return;
             }
 
-            ESP_LOGI(TAG, "GPIO9: ToggleChatState");
-            app.ToggleChatState();
+            ESP_LOGI(TAG, "GPIO9: HMBSLEEP1");
+            app.WakeWordInvoke("HMBSLEEP1", true);
         });
     }
 

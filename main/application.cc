@@ -1797,7 +1797,8 @@ void Application::HandleStateChangedEvent() {
 
             #if CONFIG_HMB_PTT_ONLY_MIC
                 audio_service_.EnableWakeWordDetection(false);
-                audio_service_.RequestInputStop();
+                // HMB Einschlaf-Coach: I2S-RX im Standby aktiviert lassen.
+                // audio_service_.RequestInputStop();
             #else
                 audio_service_.EnableWakeWordDetection(true);
             #endif

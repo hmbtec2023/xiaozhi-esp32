@@ -68,6 +68,8 @@ python3 scripts/build.py hmbtec-memorystand-c3 --name hmbtec-memorystand-c3 --la
 \
 python3 scripts/build.py hmbtec-resona-c3 --name hmbtec-resona-c3 --language de-DE\
 \
+python3 scripts/build.py hmbtec-einschlaf-coach-c3 --name hmbtec-einschlaf-coach-c3 --language de-DE\
+\
 \cf6 FLASH\cf2 :\
 python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin\
 \
