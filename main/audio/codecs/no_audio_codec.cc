@@ -235,19 +235,6 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
 
     size_t bytes_written;
     ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
-    static uint32_t diag_count = 0;
-    if (++diag_count % 100 == 0) {
-        int32_t peak = 0;
-        for (int i = 0; i < samples; ++i) {
-            int32_t v = data[i];
-            if (v < 0) v = -v;
-            if (v > peak) peak = v;
-        }
-        ESP_LOGI("HMB_AUDIO_DIAG",
-                 "PCM peak=%ld volume=%d samples=%d I2S_written=%u",
-                 (long)peak, output_volume_, samples,
-                 (unsigned)bytes_written);
-    }
     return bytes_written / sizeof(int32_t);
 }
 

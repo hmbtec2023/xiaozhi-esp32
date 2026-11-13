@@ -893,8 +893,24 @@ private:
                 return;
             }
 
-            ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP1");
-            app.WakeWordInvoke("HMBSLEEP1", true);
+            // HMB|TEC NightSession P2
+            // Zweiter Shortpress innerhalb von 300 Sekunden
+            static int64_t last_shortpress_us = 0;
+
+            const int64_t now_us = esp_timer_get_time();
+            const bool phase2 =
+                last_shortpress_us != 0 &&
+                (now_us - last_shortpress_us) <= 300000000LL;
+
+            last_shortpress_us = now_us;
+
+            if (phase2) {
+                ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP2");
+                app.WakeWordInvoke("HMBSLEEP2", false);
+            } else {
+                ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP1");
+                app.WakeWordInvoke("HMBSLEEP1", true);
+            }
         });
 
         boot_button_.OnLongPress([this]() {
