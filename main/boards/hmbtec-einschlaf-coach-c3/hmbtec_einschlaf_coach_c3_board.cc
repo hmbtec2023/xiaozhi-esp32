@@ -868,6 +868,12 @@ static void UpdateStatusPixels(DeviceState state) {
 #endif
 }
 
+
+extern const uint8_t chat_start_ogg_start[]
+    asm("_binary_CHAT_START_ogg_start");
+extern const uint8_t chat_start_ogg_end[]
+    asm("_binary_CHAT_START_ogg_end");
+
 class HmbtecEinschlafCoachC3Board : public WifiBoard {
 
 private:
@@ -887,8 +893,25 @@ private:
                 return;
             }
 
-            ESP_LOGI(TAG, "GPIO9: HMBSLEEP1");
+            ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP1");
             app.WakeWordInvoke("HMBSLEEP1", true);
+        });
+
+        boot_button_.OnLongPress([this]() {
+            auto& app = Application::GetInstance();
+
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                return;
+            }
+
+            ESP_LOGI(TAG, "GPIO9 LONG: CHAT START");
+
+            app.PlaySound(std::string_view(
+                reinterpret_cast<const char*>(chat_start_ogg_start),
+                chat_start_ogg_end - chat_start_ogg_start
+            ));
+
+            app.ToggleChatState();
         });
     }
 
@@ -1128,10 +1151,6 @@ private:
         );
 
         ESP_ERROR_CHECK(
-            esp_lcd_panel_reset(panel_)
-        );
-
-        ESP_ERROR_CHECK(
             esp_lcd_panel_init(panel_)
         );
 
@@ -1146,6 +1165,11 @@ private:
             DISPLAY_HEIGHT,
             true,
             true
+        );
+
+        // HMB|TEC: OLED um 180 Grad drehen
+        ESP_ERROR_CHECK(
+            esp_lcd_panel_mirror(panel_, false, false)
         );
 
         ESP_LOGI(TAG, "SSD1306 OLED ready");

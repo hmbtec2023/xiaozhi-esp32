@@ -1064,6 +1064,23 @@ if(CONFIG_BOARD_TYPE_HMBTEC_MEMORYSTAND_C3)
     message(STATUS "HMB ColorTales: 6 OGG-Dateien werden relativ eingebettet")
 endif()
 
+# HMB|TEC Einschlaf-Coach: OGG-Bestaetigungston
+set(HMB_SLEEP_COACH_EMBED_FILES "")
+
+if(CONFIG_BOARD_TYPE_HMBTEC_EINSCHLAF_COACH_C3)
+    set(HMB_SOUND_REL "assets/locales/de-DE/CHAT_START.ogg")
+    set(HMB_SOUND_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${HMB_SOUND_REL}")
+
+    if(NOT EXISTS "${HMB_SOUND_ABS}")
+        message(FATAL_ERROR "Einschlaf-Coach Sound fehlt: ${HMB_SOUND_ABS}")
+    endif()
+
+    list(REMOVE_ITEM LANG_SOUNDS "${HMB_SOUND_ABS}")
+    list(APPEND HMB_SLEEP_COACH_EMBED_FILES "${HMB_SOUND_REL}")
+
+    message(STATUS "HMB Einschlaf-Coach: CHAT_START.ogg eingebettet")
+endif()
+
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 
 # If target chip is ESP32, exclude specific files to avoid build errors
@@ -1121,7 +1138,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${HMB_COLORTALES_EMBED_FILES}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${HMB_COLORTALES_EMBED_FILES} ${HMB_SLEEP_COACH_EMBED_FILES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
