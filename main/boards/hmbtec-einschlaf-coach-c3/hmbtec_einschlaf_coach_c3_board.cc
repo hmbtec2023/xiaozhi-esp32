@@ -44,18 +44,18 @@
 
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
-#define HMB_PIXEL_MODE PIXEL_MODE_LAMP  // STATUS oder LAMP
+#define HMB_PIXEL_MODE PIXEL_MODE_STATUS  // STATUS oder LAMP
 //-----------------------------------------------------------------------------
 #define HMB_COLORTALES_ENABLED  0  // 1=ColorTales aktiv, 0=deaktiviert 
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
 //-----------------------------------------------------------------------------
 #define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv (für ColorTales), 0=Sensor deaktiviert
-#define HMB_OLED_ENABLED      1  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
+#define HMB_OLED_ENABLED      0  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
 #define HMB_IR_TX_CARRIER_ENABLED  0  // 1=38 kHz, 0=unmoduliertes NEC (FET direkt an IR-RX der Lampe)
 
 #define STATUS_NEOPIXEL_GPIO        8
-#define STATUS_NEOPIXEL_COUNT      16
-#define STATUS_NEOPIXEL_BRIGHTNESS 40
+#define STATUS_NEOPIXEL_COUNT      1
+#define STATUS_NEOPIXEL_BRIGHTNESS 8
 
 #define TAG "HMBEinschlafCoachC3"
 
@@ -905,10 +905,10 @@ private:
             last_shortpress_us = now_us;
 
             if (phase2) {
-                ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP2");
+                ESP_LOGI(TAG, "GPIO3 SHORT: HMBSLEEP2");
                 app.WakeWordInvoke("HMBSLEEP2", false);
             } else {
-                ESP_LOGI(TAG, "GPIO9 SHORT: HMBSLEEP1");
+                ESP_LOGI(TAG, "GPIO3 SHORT: HMBSLEEP1");
                 app.WakeWordInvoke("HMBSLEEP1", true);
             }
         });
@@ -920,7 +920,7 @@ private:
                 return;
             }
 
-            ESP_LOGI(TAG, "GPIO9 LONG: CHAT START");
+            ESP_LOGI(TAG, "GPIO3 LONG: CHAT START");
 
             app.PlaySound(std::string_view(
                 reinterpret_cast<const char*>(chat_start_ogg_start),
@@ -1194,24 +1194,24 @@ private:
 public:
 
     HmbtecEinschlafCoachC3Board()
-        : boot_button_(GPIO_NUM_9, false) {
+        : boot_button_(GPIO_NUM_3, false) {
 
         ESP_LOGI(TAG, "HMBTEC Einschlaf-Coach C3 V0.1.0");
 
-#if HMB_OLED_ENABLED || HMB_TCS34725_ENABLED
-        InitializeI2C();
-#endif
-#if HMB_OLED_ENABLED
-        InitializeDisplay();
-#else
-        display_ = new NoDisplay();
-        ESP_LOGI(TAG, "SSD1306 per #define deaktiviert: NoDisplay aktiv");
-#endif
-#if HMB_TCS34725_ENABLED
-        InitializeColorSensor();
-#else
-        ESP_LOGI(TAG, "TCS34725 per #define deaktiviert");
-#endif
+        #if HMB_OLED_ENABLED || HMB_TCS34725_ENABLED
+                InitializeI2C();
+        #endif
+        #if HMB_OLED_ENABLED
+            InitializeDisplay();
+        #else
+                display_ = new NoDisplay();
+                ESP_LOGI(TAG, "SSD1306 per #define deaktiviert: NoDisplay aktiv");
+        #endif
+        #if HMB_TCS34725_ENABLED
+                InitializeColorSensor();
+        #else
+                ESP_LOGI(TAG, "TCS34725 per #define deaktiviert");
+        #endif
 
         // NeoPixel-Anzeige mit XiaoZhi-Zustandsmaschine verbinden
         Application::GetInstance().RegisterStateChangeListener(

@@ -1,0 +1,15 @@
+BUILD:
+python3 scripts/build.py hmbtec-einschlaf-coach-c3 --name hmbtec-einschlaf-coach-c3 --language de-DE
+
+FLASH:
+python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin
+
+Monitor:
+cd ~/Documents/XIAOZHI && idf.py -p /dev/cu.usbmodem101 monitor
+
+KILL:
+sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9
+
+MP3 -> OGG:
+ffmpeg -i drago.mp3 -c:a libopus -b:a 32k -ar 48000 -ac 1 drago.ogg
+

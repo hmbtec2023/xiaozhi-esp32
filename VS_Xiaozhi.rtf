@@ -73,8 +73,9 @@ python3 scripts/build.py hmbtec-einschlaf-coach-c3 --name hmbtec-einschlaf-coach
 \cf6 FLASH\cf2 :\
 python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin\
 \
-\cf0 \expnd0\expndtw0\kerning0
-\CocoaLigature1 \
+\expnd0\expndtw0\kerning0
+python3 $IDF_PATH/tools/idf.py -p /dev/cu.usbmodem101 flash\cf0 \CocoaLigature1 \
+\
 \cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 Monitor\cf2 :\
 \pard\pardeftab720\sa240\partightenfactor0
 \cf0 \expnd0\expndtw0\kerning0
@@ -90,4 +91,6 @@ sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
 
 \f4\b0 ffmpeg -i drago.mp3 -c:a libopus -b:a 32k -ar 48000 -ac 1 drago.ogg\
 \
+
+\fs78 \
 }
