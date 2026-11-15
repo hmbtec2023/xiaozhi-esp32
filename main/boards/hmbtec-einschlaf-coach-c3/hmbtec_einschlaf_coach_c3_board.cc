@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
- * PROJECT_VERSION: 0.9.18
+ * PROJECT_VERSION: 0.9.19
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -978,6 +978,15 @@ private:
 #endif
         // Taste muss losgelassen sein, bevor LOW-Level-Wakeup aktiviert wird.
         while (gpio_get_level(GPIO_NUM_3) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+        // Abschiedsanzeige ueber die bestehende XiaoZhi-OLED-Oberflaeche.
+        // Kein direkter Framebuffer-Zugriff: LVGL verwaltet das Display weiterhin.
+#if HMB_OLED_ENABLED
+        if (display_ && panel_) {
+            display_->SetStatus("Gute Nacht - Schlafmodus");
+            ESP_LOGI(TAG, "OLED: Gute Nacht - Schlafmodus");
+            vTaskDelay(pdMS_TO_TICKS(1800));
+        }
+#endif
         // OLED-Controller ausschalten (SSD1306 Display OFF / 0xAE).
         // Die Versorgung bleibt physisch bestehen; der Bildschirm wird dunkel.
         if (panel_) {
