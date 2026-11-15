@@ -2576,6 +2576,17 @@ void Application::PlaySound(
     );
 }
 
+bool Application::IsLocalPlaybackIdle() {
+    return audio_service_.IsPlaybackIdle();
+}
+
+void Application::StopLocalSound() {
+    // Ausschliesslich im lokalen Kaminfeuer-Modus aufrufen.
+    if (GetDeviceState() == kDeviceStateIdle) {
+        audio_service_.ResetDecoder();
+    }
+}
+
 void Application::ResetProtocol() {
     Schedule([this]() {
         if (GetDeviceState() ==

@@ -1,3 +1,8 @@
+#include <atomic>
+static std::atomic<bool> hmb_fireplace_requested{false};
+static std::atomic<bool> hmb_fireplace_stop_requested{false};
+static std::atomic<bool> hmb_fireplace_end_conversation{false};
+
 #include "hmb_api_lab.h"
 #include <cstdio>
 #include <fcntl.h>
@@ -5,7 +10,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
- * PROJECT_VERSION: 0.9.19
+ * PROJECT_VERSION: 0.9.26
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -56,7 +61,7 @@
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
 #define HMB_PIXEL_MODE PIXEL_MODE_STATUS  // STATUS oder LAMP
-#define HMB_ANSAGE_TEST_MODE 0 // Testmodus fuer Board
+#define HMB_ANSAGE_TEST_MODE 0 // Historischer Testmodus (deaktiviert)
 //-----------------------------------------------------------------------------
 #define HMB_COLORTALES_ENABLED  0  // 1=ColorTales aktiv, 0=deaktiviert 
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
@@ -73,6 +78,7 @@
 
 #define HMB_DEEP_SLEEP_SOUND_EMBEDDED 1 // Auf 1 setzen, sobald DEEP_SLEEP.ogg in EMBED_FILES steht
 #define HMB_SLEEP_IDLE_MS (5LL * 60 * 1000)
+#define HMB_FIREPLACE_MAX_MS (20LL * 60 * 1000)
 #define HMB_SLEEP_SOUND_WAIT_MS 2500 // An tatsaechliche OGG-Dauer anpassen
 
 // ============================================================
@@ -502,7 +508,7 @@ static const char* GetSelectedColorName(uint8_t command) {
 }
 
 // ============================================================
-// HMB|TEC ColorTales – Farbauswahl und Figurenwechsel V0.9.4
+// HMB|TEC ColorTales – Farbauswahl und Figurenwechsel V0.9.26
 // ============================================================
 
 static void SetSelectedColor(uint8_t command, bool send_ir) {
@@ -627,6 +633,39 @@ static void InitializeStatusPixels() {
 
 static void RegisterLightMcpTools() {
     auto& mcp = McpServer::GetInstance();
+
+    mcp.AddTool(
+        "self.sleep.play_sound",
+        "Starte nach ausdruecklicher Zustimmung des Nutzers leises Kaminfeuer. "
+        "Nur bei Wunsch nach Kaminfeuer aufrufen. "
+        "Nach einer kurzen Verabschiedung wird das Gespraech automatisch beendet. "
+        "Anschliessend beginnt die Kaminfeuer-Wiedergabe. "
+        "Ein kurzer Tastendruck stoppt die Wiedergabe.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+
+            hmb_fireplace_stop_requested.store(false);
+            hmb_fireplace_requested.store(true);
+            hmb_fireplace_end_conversation.store(true);
+
+            ESP_LOGI(TAG, "FIREPLACE: MCP Start angefordert");
+
+            return std::string(
+                "Kaminfeuer aktiviert. "
+                "Verabschiede dich jetzt kurz und freundlich vom Nutzer. "
+                "Das Gespraech wird danach automatisch beendet. "
+                "Die Kaminfeuer-Wiedergabe startet anschliessend selbststaendig."
+            );
+        });
+        mcp.AddTool(
+        "self.sleep.stop_sound",
+        "Beende die lokale Kaminfeuer-Wiedergabe auf ausdruecklichen Wunsch.",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            hmb_fireplace_stop_requested.store(true);
+            return std::string("Kaminfeuer wird gestoppt.");
+        });
+
 
     mcp.AddTool(
         "self.light.set_color",
@@ -935,6 +974,58 @@ static void UpdateStatusPixels(DeviceState state) {
 }
 
 
+// HMB|TEC V0.9.25 – Opus-Kaminfeuer, via EMBED_FILES.
+extern const uint8_t fireplace_ogg_start[] asm("_binary_FIREPLACE_ogg_start");
+extern const uint8_t fireplace_ogg_end[] asm("_binary_FIREPLACE_ogg_end");
+
+// Sound-Loop-Status: MCP und GPIO3 koennen aus unterschiedlichen Tasks zugreifen.
+static std::atomic<bool> hmb_fireplace_active{false};
+static std::atomic<int64_t> hmb_fireplace_started_ms{0};
+
+static void HmbFireplaceTask(void*) {
+    auto& app = Application::GetInstance();
+    // Automatisches Gesprächsende nach der letzten XiaoZhi-Antwort
+    if (hmb_fireplace_end_conversation.load() &&
+        app.GetDeviceState() == kDeviceStateListening &&
+        app.IsLocalPlaybackIdle()) {
+
+        hmb_fireplace_end_conversation.store(false);
+
+        ESP_LOGI(TAG, "FIREPLACE: Gespraech automatisch beenden");
+
+        app.EndConversation();
+    }
+    for (;;) {
+        if (hmb_fireplace_stop_requested.exchange(false)) {
+            hmb_fireplace_requested.store(false);
+            if (hmb_fireplace_active.exchange(false)) {
+                // Nur lokale Wiedergabe stoppen; XiaoZhi-Dialog darf nicht laufen.
+                app.StopLocalSound();
+                ESP_LOGI(TAG, "FIREPLACE: gestoppt");
+            }
+        }
+        if (hmb_fireplace_requested.load()) {
+            const int64_t now = esp_timer_get_time() / 1000;
+            if (hmb_fireplace_active.load() &&
+                now - hmb_fireplace_started_ms.load() >= HMB_FIREPLACE_MAX_MS) {
+                hmb_fireplace_stop_requested.store(true);
+            } else if (app.GetDeviceState() == kDeviceStateIdle &&
+                       app.IsLocalPlaybackIdle()) {
+                if (!hmb_fireplace_active.exchange(true)) {
+                    hmb_fireplace_started_ms.store(now);
+                    ESP_LOGI(TAG, "FIREPLACE: Start");
+                }
+                // Diese Funktion kann waehrend des Einreihens von Opus-Paketen blockieren.
+                // GPIO3 setzt parallel das Stop-Flag; StopLocalSound invalidiert Pakete.
+                app.PlaySound(std::string_view(
+                    reinterpret_cast<const char*>(fireplace_ogg_start),
+                    fireplace_ogg_end - fireplace_ogg_start));
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
 extern const uint8_t chat_start_ogg_start[]
     asm("_binary_CHAT_START_ogg_start");
 extern const uint8_t chat_start_ogg_end[]
@@ -1121,6 +1212,11 @@ private:
     }
 
     void HandleShortPress() {
+        if (hmb_fireplace_requested.load() || hmb_fireplace_active.load()) {
+            hmb_fireplace_stop_requested.store(true);
+            ESP_LOGI(TAG, "GPIO3 SHORT: FIREPLACE stop (kein P-Zaehler)");
+            return;
+        }
         auto& app = Application::GetInstance();
         const auto state = app.GetDeviceState();
         if (state == kDeviceStateStarting) { EnterWifiConfigMode(); return; }
@@ -1176,6 +1272,10 @@ private:
                 const int64_t held = now_ms - down_ms;
                 if (held >= 1000 && !long_sound) {
                     long_sound = true;
+                    if (hmb_fireplace_requested.load() || hmb_fireplace_active.load()) {
+                        hmb_fireplace_stop_requested.store(true);
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                    }
                     ESP_LOGI(TAG, "🔊 GPIO3 LONG-Schwelle: CHAT_START.ogg");
                     Application::GetInstance().PlaySound(std::string_view(
                         reinterpret_cast<const char*>(chat_start_ogg_start),
@@ -1211,7 +1311,8 @@ private:
                     HandleShortPress();
                 }
             }
-            if (!pressed && !sleep_entering_ && state == kDeviceStateIdle &&
+            if (!hmb_fireplace_requested.load() && !hmb_fireplace_active.load() &&
+                !pressed && !sleep_entering_ && state == kDeviceStateIdle &&
                 now_ms - idle_since_ms >= HMB_SLEEP_IDLE_MS) {
                 EnterDeepSleep(false);
             }
@@ -1530,6 +1631,9 @@ public:
         InitializeButtons();
         InitializeIrTransmitter();
         RegisterLightMcpTools();
+        if (xTaskCreate(HmbFireplaceTask, "hmb_fireplace", 4096, nullptr, 2, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "FIREPLACE Task konnte nicht gestartet werden");
+        }
             // GPIO3 ist exklusiv Taster/Wakeup: IR-RX auf GPIO3 deaktiviert.
             InitializeStatusPixels();
 #if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
