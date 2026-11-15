@@ -1064,21 +1064,24 @@ if(CONFIG_BOARD_TYPE_HMBTEC_MEMORYSTAND_C3)
     message(STATUS "HMB ColorTales: 6 OGG-Dateien werden relativ eingebettet")
 endif()
 
-# HMB|TEC Einschlaf-Coach: OGG-Bestaetigungston
+# HMB|TEC Einschlaf-Coach: feste relative OGG-Embed-Pfade
 set(HMB_SLEEP_COACH_EMBED_FILES "")
 
 if(CONFIG_BOARD_TYPE_HMBTEC_EINSCHLAF_COACH_C3)
-    set(HMB_SOUND_REL "assets/locales/de-DE/CHAT_START.ogg")
-    set(HMB_SOUND_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${HMB_SOUND_REL}")
+    foreach(HMB_SOUND_NAME CHAT_START DEEP_SLEEP)
+        set(HMB_SOUND_REL "assets/locales/de-DE/${HMB_SOUND_NAME}.ogg")
+        set(HMB_SOUND_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${HMB_SOUND_REL}")
 
-    if(NOT EXISTS "${HMB_SOUND_ABS}")
-        message(FATAL_ERROR "Einschlaf-Coach Sound fehlt: ${HMB_SOUND_ABS}")
-    endif()
+        if(NOT EXISTS "${HMB_SOUND_ABS}")
+            message(FATAL_ERROR "Einschlaf-Coach Sound fehlt: ${HMB_SOUND_ABS}")
+        endif()
 
-    list(REMOVE_ITEM LANG_SOUNDS "${HMB_SOUND_ABS}")
-    list(APPEND HMB_SLEEP_COACH_EMBED_FILES "${HMB_SOUND_REL}")
+        # Doppelte Einbettung ueber den Sprachdatei-GLOB vermeiden.
+        list(REMOVE_ITEM LANG_SOUNDS "${HMB_SOUND_ABS}")
+        list(APPEND HMB_SLEEP_COACH_EMBED_FILES "${HMB_SOUND_REL}")
+    endforeach()
 
-    message(STATUS "HMB Einschlaf-Coach: CHAT_START.ogg eingebettet")
+    message(STATUS "HMB Einschlaf-Coach: CHAT_START.ogg und DEEP_SLEEP.ogg eingebettet")
 endif()
 
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)

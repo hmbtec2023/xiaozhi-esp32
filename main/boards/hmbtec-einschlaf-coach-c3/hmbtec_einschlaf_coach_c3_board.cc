@@ -1,7 +1,7 @@
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
- * PROJECT_VERSION: 0.9.11
+ * PROJECT_VERSION: 0.9.18
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -37,6 +37,13 @@
 #include <driver/rmt_encoder.h>
 #include <inttypes.h>
 #include <algorithm>
+#include <atomic>
+#include <esp_timer.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
+#include <ctime>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "led_strip.h"
 #include "device_state_machine.h"
 #include "led_strip_spi.h"
@@ -50,14 +57,18 @@
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
 //-----------------------------------------------------------------------------
 #define HMB_TCS34725_ENABLED  0  // 1=Sensor aktiv (für ColorTales), 0=Sensor deaktiviert
-#define HMB_OLED_ENABLED      0  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
+#define HMB_OLED_ENABLED      1  // 1=SSD1306 aktiv, 0=ohne OLED (NoDisplay)
 #define HMB_IR_TX_CARRIER_ENABLED  0  // 1=38 kHz, 0=unmoduliertes NEC (FET direkt an IR-RX der Lampe)
 
 #define STATUS_NEOPIXEL_GPIO        8
 #define STATUS_NEOPIXEL_COUNT      1
-#define STATUS_NEOPIXEL_BRIGHTNESS 8
+#define STATUS_NEOPIXEL_BRIGHTNESS 150  // maximaler RGB-Kanalwert (0..255)
 
 #define TAG "HMBEinschlafCoachC3"
+
+#define HMB_DEEP_SLEEP_SOUND_EMBEDDED 1 // Auf 1 setzen, sobald DEEP_SLEEP.ogg in EMBED_FILES steht
+#define HMB_SLEEP_IDLE_MS (5LL * 60 * 1000)
+#define HMB_SLEEP_SOUND_WAIT_MS 2500 // An tatsaechliche OGG-Dauer anpassen
 
 // ============================================================
 // HMB|TEC ColorTales
@@ -337,14 +348,20 @@ static void SendIrCommand(uint8_t command) {
 
 static led_strip_handle_t status_strip = nullptr;
 
+// RGB-Eingaben 0..255 werden auf die schlafgerechte Maximalhelligkeit skaliert.
 static void StatusPixelFill(uint8_t r, uint8_t g, uint8_t b) {
     if (!status_strip) return;
-
-    for (int i = 0; i < STATUS_NEOPIXEL_COUNT; i++) {
-        led_strip_set_pixel(status_strip, i, r, g, b);
+    const auto scale = [](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(
+            (static_cast<uint16_t>(value) * STATUS_NEOPIXEL_BRIGHTNESS + 127) / 255);
+    };
+    for (int i = 0; i < STATUS_NEOPIXEL_COUNT; ++i) {
+        led_strip_set_pixel(status_strip, i, scale(r), scale(g), scale(b));
     }
-
-    led_strip_refresh(status_strip);
+    esp_err_t err = led_strip_refresh(status_strip);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NeoPixel refresh: %s", esp_err_to_name(err));
+    }
 }
 
 static void UpdateLampPixels(uint8_t command) {
@@ -594,7 +611,8 @@ static void InitializeStatusPixels() {
     #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
         UpdateLampPixels(ir_selected_color);
     #else
-        StatusPixelFill(10, 10, 10);
+        // Statusanzeige bleibt bis zur ersten Zustandsaktualisierung aus.
+        StatusPixelFill(0, 0, 0);
     #endif
 
     ESP_LOGI(TAG, "NeoPixel SPI: %d LEDs an GPIO%d bereit",
@@ -834,35 +852,78 @@ return std::string(
     );
 }
 
-static void UpdateStatusPixels(DeviceState state) {
-
+// HMB|TEC Sleep Companion: State-Callback setzt nur den Zielzustand.
+// Ein eigener Task ist der einzige LED-Schreiber im STATUS-Modus.
 #if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+static std::atomic<bool> status_pixel_sleeping{false};
+static std::atomic<int> status_pixel_state{static_cast<int>(kDeviceStateStarting)};
+static std::atomic<int64_t> status_pixel_changed_us{0};
 
-    switch (state) {
-        case kDeviceStateIdle:
-            StatusPixelFill(10, 10, 10);
-            break;
+static uint8_t SleepPixelPulse(uint32_t elapsed_ms, uint32_t period_ms,
+                               uint8_t minimum, uint8_t maximum) {
+    const uint32_t half = period_ms / 2;
+    const uint32_t phase = elapsed_ms % period_ms;
+    const uint32_t triangle = (phase <= half) ? phase : (period_ms - phase);
+    return static_cast<uint8_t>(minimum +
+        (static_cast<uint32_t>(maximum - minimum) * triangle) / half);
+}
 
-        case kDeviceStateListening:
-            StatusPixelFill(0, 0, 40);
-            break;
-
-        case kDeviceStateSpeaking:
-            StatusPixelFill(0, 40, 0);
-            break;
-
-        case kDeviceStateConnecting:
-            StatusPixelFill(40, 20, 0);
-            break;
-
-        case kDeviceStateFatalError:
-            StatusPixelFill(40, 0, 0);
-            break;
-
-        default:
-            break;
+static void SleepPixelTask(void*) {
+    int last_state = -1;
+    uint8_t last_r = 255, last_g = 255, last_b = 255;
+    while (true) {
+        if (status_pixel_sleeping.load()) {
+            vTaskDelay(pdMS_TO_TICKS(40));
+            continue;
+        }
+        const int state = status_pixel_state.load();
+        if (state != last_state) {
+            last_state = state;
+            last_r = last_g = last_b = 255;
+        }
+        const int64_t changed = status_pixel_changed_us.load();
+        const uint32_t ms = static_cast<uint32_t>(
+            std::max<int64_t>(0, (esp_timer_get_time() - changed) / 1000));
+        uint8_t r = 0, g = 0, b = 0;
+        switch (static_cast<DeviceState>(state)) {
+            case kDeviceStateStarting:
+                if (ms < 500) { r = 180; g = 110; b = 55; }
+                break;
+            case kDeviceStateConnecting: {
+                const uint8_t level = SleepPixelPulse(ms, 2400, 15, 180);
+                b = level;
+                break;
+            }
+            case kDeviceStateListening: {
+                const uint8_t level = SleepPixelPulse(ms, 2200, 20, 180);
+                g = level;
+                b = level;
+                break;
+            }
+            case kDeviceStateSpeaking:
+                r = 220; g = 95; b = 8;  // sanftes Amber
+                break;
+            case kDeviceStateFatalError:
+                // Einmalig drei kurze rote Blinkimpulse pro Fehlerereignis.
+                if (ms < 1500 && (ms % 500) < 180) r = 255;
+                break;
+            case kDeviceStateIdle:
+            default:
+                break; // LED aus, auch bei unbekannten Zustaenden
+        }
+        if (r != last_r || g != last_g || b != last_b) {
+            StatusPixelFill(r, g, b);
+            last_r = r; last_g = g; last_b = b;
+        }
+        vTaskDelay(pdMS_TO_TICKS(40));
     }
+}
+#endif
 
+static void UpdateStatusPixels(DeviceState state) {
+#if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+    status_pixel_changed_us.store(esp_timer_get_time());
+    status_pixel_state.store(static_cast<int>(state));
 #else
     (void)state;
 #endif
@@ -874,6 +935,16 @@ extern const uint8_t chat_start_ogg_start[]
 extern const uint8_t chat_start_ogg_end[]
     asm("_binary_CHAT_START_ogg_end");
 
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+extern const uint8_t deep_sleep_ogg_start[] asm("_binary_DEEP_SLEEP_ogg_start");
+extern const uint8_t deep_sleep_ogg_end[] asm("_binary_DEEP_SLEEP_ogg_end");
+#endif
+
+// RTC_DATA_ATTR ueberlebt Deep Sleep, aber keinen Stromverlust.
+RTC_DATA_ATTR static uint32_t hmb_night_magic = 0;
+RTC_DATA_ATTR static uint8_t hmb_night_count = 0;
+RTC_DATA_ATTR static time_t hmb_night_last_epoch = 0;
+
 class HmbtecEinschlafCoachC3Board : public WifiBoard {
 
 private:
@@ -884,52 +955,171 @@ private:
     Button boot_button_;
     HmbtecIrRemoteController ir_receiver_{IR_RX_GPIO};
 
-    void InitializeButtons() {
-        boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-                return;
-            }
-
-            // HMB|TEC NightSession P2
-            // Zweiter Shortpress innerhalb von 300 Sekunden
-            static int64_t last_shortpress_us = 0;
-
-            const int64_t now_us = esp_timer_get_time();
-            const bool phase2 =
-                last_shortpress_us != 0 &&
-                (now_us - last_shortpress_us) <= 300000000LL;
-
-            last_shortpress_us = now_us;
-
-            if (phase2) {
-                ESP_LOGI(TAG, "GPIO3 SHORT: HMBSLEEP2");
-                app.WakeWordInvoke("HMBSLEEP2", false);
-            } else {
-                ESP_LOGI(TAG, "GPIO3 SHORT: HMBSLEEP1");
-                app.WakeWordInvoke("HMBSLEEP1", true);
-            }
-        });
-
-        boot_button_.OnLongPress([this]() {
-            auto& app = Application::GetInstance();
-
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                return;
-            }
-
-            ESP_LOGI(TAG, "GPIO3 LONG: CHAT START");
-
-            app.PlaySound(std::string_view(
-                reinterpret_cast<const char*>(chat_start_ogg_start),
-                chat_start_ogg_end - chat_start_ogg_start
-            ));
-
-            app.ToggleChatState();
-        });
+    // Ein-Tasten-Steuerung: Sounds bei Erreichen der Halteschwelle,
+    // Aktionen erst beim Loslassen. Eigener Task vermeidet OnLongPress/OnClick-Kollision.
+    static void ButtonTaskEntry(void* ctx) {
+        static_cast<HmbtecEinschlafCoachC3Board*>(ctx)->ButtonTask();
     }
+
+    void EnterDeepSleep(bool with_sound) {
+        if (sleep_entering_) return;
+        sleep_entering_ = true;
+        ESP_LOGI(TAG, "🌙 Deep Sleep vorbereiten, Sound=%d", with_sound);
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+        if (with_sound) {
+            Application::GetInstance().PlaySound(std::string_view(
+                reinterpret_cast<const char*>(deep_sleep_ogg_start),
+                deep_sleep_ogg_end - deep_sleep_ogg_start));
+            // PlaySound bietet hier keine Fertig-Meldung; Wartezeit auf OGG-Laenge abstimmen.
+            vTaskDelay(pdMS_TO_TICKS(HMB_SLEEP_SOUND_WAIT_MS));
+        }
+#else
+        if (with_sound) ESP_LOGW(TAG, "DEEP_SLEEP.ogg noch nicht eingebettet");
+#endif
+        // Taste muss losgelassen sein, bevor LOW-Level-Wakeup aktiviert wird.
+        while (gpio_get_level(GPIO_NUM_3) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+        // OLED-Controller ausschalten (SSD1306 Display OFF / 0xAE).
+        // Die Versorgung bleibt physisch bestehen; der Bildschirm wird dunkel.
+        if (panel_) {
+            const esp_err_t oled_err = esp_lcd_panel_disp_on_off(panel_, false);
+            if (oled_err == ESP_OK) {
+                ESP_LOGI(TAG, "🌑 OLED ausgeschaltet");
+            } else {
+                ESP_LOGW(TAG, "⚠️ OLED OFF fehlgeschlagen: %s", esp_err_to_name(oled_err));
+            }
+        }
+#if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+        // LED-Task vor dem letzten Clear sperren, damit er nicht erneut schreibt.
+        status_pixel_sleeping.store(true);
+        vTaskDelay(pdMS_TO_TICKS(60));
+#endif
+        if (status_strip) {
+            const esp_err_t led_err = led_strip_clear(status_strip);
+            if (led_err == ESP_OK) ESP_LOGI(TAG, "💡 NeoPixel ausgeschaltet");
+            else ESP_LOGW(TAG, "⚠️ NeoPixel OFF fehlgeschlagen: %s", esp_err_to_name(led_err));
+        }
+
+        // ESP32-C3 / ESP-IDF 6.1: GPIO3 LOW als Deep-Sleep-Wakeup.
+        // Anders als esp_sleep_enable_gpio_wakeup() gilt diese API auch
+        // fuer Deep Sleep bei abgeschalteter HP-Peripherie.
+        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(GPIO_NUM_3, GPIO_PULLUP_ONLY);
+        esp_err_t err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(
+            1ULL << GPIO_NUM_3, ESP_GPIO_WAKEUP_GPIO_LOW);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "GPIO3 Deep-Sleep-Wakeup fehlgeschlagen: %s", esp_err_to_name(err));
+#if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+            status_pixel_sleeping.store(false);
+#endif
+            if (panel_) esp_lcd_panel_disp_on_off(panel_, true);
+            sleep_entering_ = false;
+            return;
+        }
+        ESP_LOGI(TAG, "GPIO3 LOW als Deep-Sleep-Wakeup aktiviert");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_deep_sleep_start();
+    }
+
+    void HandleShortPress() {
+        auto& app = Application::GetInstance();
+        const auto state = app.GetDeviceState();
+        if (state == kDeviceStateStarting) { EnterWifiConfigMode(); return; }
+        if (state == kDeviceStateConnecting) return;
+        if (state == kDeviceStateSpeaking) { app.ToggleChatState(); return; }
+        if (state == kDeviceStateListening) { app.EndConversation(); return; }
+        if (state != kDeviceStateIdle) return;
+
+        const time_t now = time(nullptr);
+        // Epoch nur nutzen, wenn die Uhr bereits synchronisiert wurde.
+        const bool valid_time = now > 1700000000;
+        if (hmb_night_magic != 0x484D4231 ||
+            (valid_time && hmb_night_last_epoch > 0 &&
+             (now < hmb_night_last_epoch || now - hmb_night_last_epoch >= 8 * 3600))) {
+            hmb_night_count = 0;
+        }
+        hmb_night_magic = 0x484D4231;
+        if (hmb_night_count < 3) ++hmb_night_count;
+        if (valid_time) hmb_night_last_epoch = now;
+        ESP_LOGI(TAG, "🌙 Sleep: Aktivierung P%u", unsigned(hmb_night_count));
+        if (hmb_night_count == 1) app.WakeWordInvoke("HMBSLEEP1", true);
+        else if (hmb_night_count == 2) app.WakeWordInvoke("HMBSLEEP2", false);
+        else app.WakeWordInvoke("HMBSLEEP3", false);
+    }
+
+    void ButtonTask() {
+        // Nach Deep-Sleep-Wakeup zuerst das Loslassen abwarten.
+        while (gpio_get_level(GPIO_NUM_3) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+        bool pressed = false;
+        bool long_sound = false;
+        bool very_long_sound = false;
+        int64_t down_ms = 0;
+        int64_t idle_since_ms = esp_timer_get_time() / 1000;
+        DeviceState prev_state = Application::GetInstance().GetDeviceState();
+        while (true) {
+            const int64_t now_ms = esp_timer_get_time() / 1000;
+            const auto state = Application::GetInstance().GetDeviceState();
+            if (state != prev_state) { idle_since_ms = now_ms; prev_state = state; }
+            const bool down = gpio_get_level(GPIO_NUM_3) == 0;
+            if (down && !pressed) {
+                pressed = true; down_ms = now_ms;
+                long_sound = false; very_long_sound = false;
+                idle_since_ms = now_ms;
+            }
+            if (down && pressed) {
+                const int64_t held = now_ms - down_ms;
+                if (held >= 1000 && !long_sound) {
+                    long_sound = true;
+                    ESP_LOGI(TAG, "🔊 GPIO3 LONG-Schwelle: CHAT_START.ogg");
+                    Application::GetInstance().PlaySound(std::string_view(
+                        reinterpret_cast<const char*>(chat_start_ogg_start),
+                        chat_start_ogg_end - chat_start_ogg_start));
+                }
+                if (held >= 4000 && !very_long_sound) {
+                    very_long_sound = true;
+                    ESP_LOGI(TAG, "🔊 GPIO3 VERY-LONG-Schwelle: DEEP_SLEEP.ogg bei Loslassen schlafen");
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+                    Application::GetInstance().PlaySound(std::string_view(
+                        reinterpret_cast<const char*>(deep_sleep_ogg_start),
+                        deep_sleep_ogg_end - deep_sleep_ogg_start));
+#else
+                    ESP_LOGW(TAG, "DEEP_SLEEP.ogg noch nicht eingebettet");
+#endif
+                }
+            }
+            if (!down && pressed) {
+                pressed = false;
+                const int64_t held = now_ms - down_ms;
+                idle_since_ms = now_ms;
+                if (held >= 4000) {
+                    // Sound lief bereits bei Erreichen der Schwelle.
+                    sleep_entering_ = true;
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+                    vTaskDelay(pdMS_TO_TICKS(HMB_SLEEP_SOUND_WAIT_MS));
+#endif
+                    sleep_entering_ = false;
+                    EnterDeepSleep(false);
+                } else if (held >= 1000) {
+                    Application::GetInstance().ToggleChatState();
+                } else if (held >= 40) {
+                    HandleShortPress();
+                }
+            }
+            if (!pressed && !sleep_entering_ && state == kDeviceStateIdle &&
+                now_ms - idle_since_ms >= HMB_SLEEP_IDLE_MS) {
+                EnterDeepSleep(false);
+            }
+            if (state != kDeviceStateIdle || pressed) idle_since_ms = now_ms;
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
+    void InitializeButtons() {
+        gpio_set_direction(GPIO_NUM_3, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(GPIO_NUM_3, GPIO_PULLUP_ONLY);
+        xTaskCreate(ButtonTaskEntry, "hmb_sleep_button", 4096, this, 4, nullptr);
+    }
+
+    bool sleep_entering_ = false;
 
     Display* display_ = nullptr;
 
@@ -1109,7 +1299,7 @@ private:
 
     void InitializeI2C() {
 
-        ESP_LOGI(TAG, "Initializing I2C SDA=%d SCL=%d",
+        ESP_LOGI(TAG, "🔌 Initialisiere I2C SDA=%d SCL=%d",
                  DISPLAY_SDA_PIN, DISPLAY_SCL_PIN);
 
         i2c_master_bus_config_t bus_config = {};
@@ -1188,7 +1378,7 @@ private:
             esp_lcd_panel_mirror(panel_, false, false)
         );
 
-        ESP_LOGI(TAG, "SSD1306 OLED ready");
+        ESP_LOGI(TAG, "🖥️ SSD1306 OLED bereit");
     }
 
 public:
@@ -1196,7 +1386,11 @@ public:
     HmbtecEinschlafCoachC3Board()
         : boot_button_(GPIO_NUM_3, false) {
 
-        ESP_LOGI(TAG, "HMBTEC Einschlaf-Coach C3 V0.1.0");
+        // Die periodischen SystemInfo-Speichermeldungen aus dem Serial-Log ausblenden.
+        // Betrifft nur diesen Log-Tag, nicht andere Fehler-/Warnmeldungen.
+        esp_log_level_set("SystemInfo", ESP_LOG_NONE);
+        ESP_LOGI(TAG, "🚀 HMBTEC Sleep Companion C3 V0.9.17");
+        ESP_LOGI(TAG, "🔘 GPIO3: Short / Long / Very-Long; Wakeup aus Deep Sleep");
 
         #if HMB_OLED_ENABLED || HMB_TCS34725_ENABLED
                 InitializeI2C();
@@ -1216,7 +1410,7 @@ public:
         // NeoPixel-Anzeige mit XiaoZhi-Zustandsmaschine verbinden
         Application::GetInstance().RegisterStateChangeListener(
             [](DeviceState old_state, DeviceState new_state) {
-                ESP_LOGI(TAG, "NeoPixel: State %d -> %d",
+                ESP_LOGI(TAG, "💡 NeoPixel: State %d -> %d",
                         static_cast<int>(old_state),
                         static_cast<int>(new_state));
 
@@ -1226,203 +1420,18 @@ public:
         InitializeButtons();
         InitializeIrTransmitter();
         RegisterLightMcpTools();
-            ir_receiver_.SetCommandCallback([](uint8_t command) {
-                ESP_LOGI(TAG, "IR RX=0x%02X", command);
-                switch (command) {
-                    case IR_NEC_RED:
-                    case IR_NEC_RED_1:
-                    case IR_NEC_RED_2:
-                    case IR_NEC_GREEN:
-                    case IR_NEC_GREEN_1:
-                    case IR_NEC_GREEN_2:
-                    case IR_NEC_GREEN_3:
-                    case IR_NEC_BLUE:
-                    case IR_NEC_BLUE_1:
-                    case IR_NEC_BLUE_2:
-                    case IR_NEC_BLUE_3:
-                    case IR_NEC_CYAN:
-                    case IR_NEC_PURPLE:
-                    case IR_NEC_ORANGE:
-                    case IR_NEC_YELLOW:
-                    case IR_NEC_WEISS:
-                        SetSelectedColor(command, false);
-                        break;
-                    // ==========================================
-                    // OFF – KI-Dialog vollständig beenden
-                    // ==========================================
-                    case IR_NEC_OFF:
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            StatusPixelFill(5, 5, 5);
-                        #endif
-
-                        #if HMB_COLORTALES_ENABLED
-                            ESP_LOGI(TAG, "IR OFF: KI-Dialog beenden -> IDLE");
-                            ct_state = ColorTalesState::CT_OFF;
-                            Application::GetInstance().EndConversation();
-                        #else
-                            SendIrCommand(IR_NEC_OFF);
-                            ESP_LOGI(TAG, "KI: Bereitschaftszustand -> IDLE");
-                            Application::GetInstance().EndConversation();
-                        #endif
-
-                        break;
-                    // ==========================================
-                    // UP / DOWN – XiaoZhi-Audiolautstärke
-                    // ==========================================
-                    case IR_NEC_UP:
-                    case IR_NEC_DOWN: {
-                        auto* codec = Board::GetInstance().GetAudioCodec();
-
-                        int volume = codec->output_volume();
-
-                        volume += (command == IR_NEC_UP) ? 10 : -10;
-                        volume = std::clamp(volume, 0, 100);
-
-                        codec->SetOutputVolume(volume);
-
-                        ESP_LOGI(TAG, "AUDIO: Lautstaerke = %d%%", volume);
-                        break;
-                    }
-                    //--------------------------------------------------------------
-                    // HMB|TEC ColorTales – Aktivierung über ON-Taste
-                    //--------------------------------------------------------------
-                    case IR_NEC_ON: {
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            UpdateLampPixels(ir_selected_color);
-                        #endif
-
-                        #if HMB_COLORTALES_ENABLED
-                            const bool white = (ir_selected_color == IR_NEC_WEISS);
-                            const bool resume = (ct_state == ColorTalesState::CT_PAUSED);
-                            const char* character = GetColorTalesCharacter(ir_selected_color);
-
-                            // WEISS ist der neutrale Story-Start und darf ON nicht blockieren.
-                            if (!white && !character) {
-                                ESP_LOGW(TAG, "COLORTALES: Keine Figur fuer %s",
-                                        GetSelectedColorName(ir_selected_color));
-                                break;
-                            }
-
-                            #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                                UpdateLampPixels(ir_selected_color);
-                            #endif
-
-                            ct_active_color = ir_selected_color;
-                            ct_state = ColorTalesState::CT_ACTIVE;
-
-                            ESP_LOGI(TAG, "COLORTALES: %s Figur=%s",
-                                    resume ? "FORTSETZUNG" : "START",
-                                    white ? "ERZAEHLER (WEISS)" : character);
-
-                            // Nach WEISS-Pause die bisherige Geschichte fortsetzen.
-                            // Beim ersten ON nach Reset mit WEISS eine neue Geschichte starten.
-                            if (resume) {
-                                PlayColorTalesSound(ir_selected_color);
-                                //! Application::GetInstance().WakeWordInvoke("HMBCOLORTALESWECHSEL", false);
-                            } else {
-                                PlayColorTalesSound(ir_selected_color);
-                                Application::GetInstance().WakeWordInvoke(
-                                    "HMBCOLORTALES", false);
-                            }
-                        #else
-                            ESP_LOGI(TAG, "IR ON: ColorTales deaktiviert");
-                            ESP_LOGI(TAG, "KI: Bereitschaftszustand -> IDLE");
-                            Application::GetInstance().EndConversation();
-                            PlayColorTalesSound(IR_NEC_WEISS);
-                        #endif
-                        break;
-                    }
-                    //--------------------------------------------------------------  
-                    case IR_NEC_FLASH:
-                    //-------------------------------------------------------------
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            UpdateLampPixels(ir_selected_color);
-                        #endif
-
-                        ESP_LOGI(TAG,
-                                "AFFIRMATION: FLASH erkannt, Farbe=0x%02X",
-                                ir_selected_color);
-
-                        // FLASH-Modus der Lampe beenden
-                        // und zuletzt gewählte Farbe wiederherstellen
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                        SendIrCommand(ir_selected_color);
-                        ESP_LOGI(TAG, "AFFIRMATION: Farbe wiederhergestellt");
-
-                        // XiaoZhi-Dialog NICHT starten
-                        Application::GetInstance().WakeWordInvoke("HMBPROMPT", true);
-
-                        ESP_LOGI(TAG, "AFFIRMATION: XiaoZhi-Dialog angefordert");
-                        break;
-                    //-------------------------------------------------------------        
-                    case IR_NEC_STROBE:
-                    //-------------------------------------------------------------
-                        #if HMB_PIXEL_MODE == PIXEL_MODE_LAMP
-                            UpdateLampPixels(ir_selected_color);
-                        #endif
-
-                        ESP_LOGI(TAG,
-                                 "SEELSORGE: STROBE erkannt, Farbe=0x%02X",
-                                 ir_selected_color);
-
-                        // STROBE beenden und vorherige Farbe wiederherstellen
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                        SendIrCommand(ir_selected_color);
-
-                        ESP_LOGI(TAG, "SEELSORGE: Farbe wiederhergestellt");
-
-                        // XiaoZhi-Seelsorge über MCP auslösen
-                        Application::GetInstance().WakeWordInvoke(
-                            "HMBSEELSORGE", false
-                        );
-
-                        ESP_LOGI(TAG, "SEELSORGE: XiaoZhi-Dialog angefordert");
-                        break;
-    
-                    // ==========================================
-                    // FADE – Wissensgestützte Erinnerungsreise
-                    // Originalen FADE-Lichteffekt beibehalten
-                    // ==========================================
-                    case IR_NEC_FADE:
-                        ESP_LOGI(TAG,
-                                 "ERINNERUNG: FADE erkannt, Farbkontext=0x%02X",
-                                 ir_selected_color);
-
-                        // XiaoZhi-Dialog starten
-                        Application::GetInstance().WakeWordInvoke(
-                            "HMBERINNERUNG", false
-                        );
-
-                        ESP_LOGI(TAG, "ERINNERUNG: XiaoZhi-Dialog aktiviert");
-                        break;
-
-                    // ==========================================
-                    // SMOOTH – Geführte Achtsamkeit
-                    // Originalen SMOOTH-Lichteffekt beibehalten
-                    // ==========================================
-                    case IR_NEC_SMOOTH:
-                        ESP_LOGI(TAG,
-                                 "ACHTSAMKEIT: SMOOTH erkannt, Farbkontext=0x%02X",
-                                 ir_selected_color);
-
-                        // XiaoZhi-Dialog starten
-                        Application::GetInstance().WakeWordInvoke(
-                            "HMBACHTSAMKEIT", false
-                        );
-
-                        ESP_LOGI(TAG, "ACHTSAMKEIT: XiaoZhi aktiviert");
-                        break;
-
-                    default:
-                        break;      
-              }
-            });
-            if (!ir_receiver_.Initialize()) {
-                ESP_LOGE(TAG, "IR RX INITIALISIERUNG FEHLGESCHLAGEN!");
-            } else {
-                ESP_LOGI(TAG, "IR RX BEREIT - GPIO%d", static_cast<int>(IR_RX_GPIO));
-            }
+            // GPIO3 ist exklusiv Taster/Wakeup: IR-RX auf GPIO3 deaktiviert.
             InitializeStatusPixels();
+#if HMB_PIXEL_MODE == PIXEL_MODE_STATUS
+            if (status_strip) {
+                UpdateStatusPixels(Application::GetInstance().GetDeviceState());
+                BaseType_t created = xTaskCreate(
+                    SleepPixelTask, "sleep_pixel", 3072, nullptr, 2, nullptr);
+                if (created != pdPASS) {
+                    ESP_LOGE(TAG, "SleepPixelTask konnte nicht gestartet werden");
+                }
+            }
+#endif
 #if HMB_TCS34725_ENABLED
             StartColorScanTask();
 #endif
