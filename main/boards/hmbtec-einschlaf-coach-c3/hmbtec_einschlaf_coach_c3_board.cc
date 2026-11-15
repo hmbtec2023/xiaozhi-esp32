@@ -1,3 +1,7 @@
+#include "hmb_api_lab.h"
+#include <cstdio>
+#include <fcntl.h>
+#include <unistd.h>
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
@@ -52,6 +56,7 @@
 #define PIXEL_MODE_STATUS  0
 #define PIXEL_MODE_LAMP    1
 #define HMB_PIXEL_MODE PIXEL_MODE_STATUS  // STATUS oder LAMP
+#define HMB_ANSAGE_TEST_MODE 0 // Testmodus fuer Board
 //-----------------------------------------------------------------------------
 #define HMB_COLORTALES_ENABLED  0  // 1=ColorTales aktiv, 0=deaktiviert 
 #define HMB_COLORTALES_SOUNDS 1  // OGG-Figurensounds aktiv
@@ -1029,6 +1034,92 @@ private:
         esp_deep_sleep_start();
     }
 
+    // Ansage-Test: Short=One-Shot, Long=Chat, Very-Long=Deep Sleep.
+    void HandleAnsageTestPress() {
+        static uint8_t next_prompt = 0;
+        static constexpr const char* prompts[] = {"HMBSLEEP1", "HMBSLEEP2", "HMBSLEEP3"};
+        const char* prompt = prompts[next_prompt];
+        next_prompt = (next_prompt + 1) % 3;
+        HmbApiLab::request(prompt);
+        ESP_LOGI(TAG, "ANSAGE-TEST: %s (naechster Tastendruck: P%u)",
+                 prompt, unsigned(next_prompt + 1));
+        // XiaoZhi bleibt fuer die serverseitige Sprachausgabe erforderlich.
+        // true: manueller One-Shot-Modus, TTS-Ende fuehrt nach idle.
+        Application::GetInstance().WakeWordInvoke(prompt, true);
+    }
+
+    void AnsageTestButtonTask() {
+        while (gpio_get_level(GPIO_NUM_3) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+        bool pressed = false;
+        bool long_sound = false;
+        bool very_long_sound = false;
+        int64_t down_ms = 0;
+        // Serielle Konsole: stdin nur non-blocking abfragen (USB-CDC/USB-JTAG je nach sdkconfig).
+        const int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        if (flags >= 0) fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        ESP_LOGI("HMB_API_LAB", "Menue: 1/2/3=Prompt, a=Sequenz, s=Status, r=Reset, h=Hilfe");
+        while (true) {
+            char cmd;
+            if (read(STDIN_FILENO, &cmd, 1) == 1) {
+                if (cmd >= '1' && cmd <= '3') {
+                    static constexpr const char* prompts[] = {"HMBSLEEP1", "HMBSLEEP2", "HMBSLEEP3"};
+                    const char* prompt = prompts[cmd - '1'];
+                    HmbApiLab::request(prompt);
+                    Application::GetInstance().WakeWordInvoke(prompt, true);
+                } else if (cmd == 's') HmbApiLab::status();
+                else if (cmd == 'r') HmbApiLab::reset();
+                else if (cmd == 'h') ESP_LOGI("HMB_API_LAB", "1/2/3 Prompt, s Status, r Reset; GPIO3 zyklisch P1/P2/P3");
+                else if (cmd == 'a') ESP_LOGW("HMB_API_LAB", "Auto-Sequenz noch nicht aktiv: erst Sitzungsende-Messung auswerten");
+            }
+
+            const int64_t now_ms = esp_timer_get_time() / 1000;
+            const bool down = gpio_get_level(GPIO_NUM_3) == 0;
+            if (down && !pressed) {
+                pressed = true;
+                down_ms = now_ms;
+                long_sound = false;
+                very_long_sound = false;
+            }
+            if (down && pressed) {
+                const int64_t held = now_ms - down_ms;
+                if (held >= 1000 && !long_sound) {
+                    long_sound = true;
+                    ESP_LOGI(TAG, "GPIO3 LONG: CHAT_START.ogg");
+                    Application::GetInstance().PlaySound(std::string_view(
+                        reinterpret_cast<const char*>(chat_start_ogg_start),
+                        chat_start_ogg_end - chat_start_ogg_start));
+                }
+                if (held >= 4000 && !very_long_sound) {
+                    very_long_sound = true;
+                    ESP_LOGI(TAG, "GPIO3 VERY-LONG: DEEP_SLEEP.ogg");
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+                    Application::GetInstance().PlaySound(std::string_view(
+                        reinterpret_cast<const char*>(deep_sleep_ogg_start),
+                        deep_sleep_ogg_end - deep_sleep_ogg_start));
+#endif
+                }
+            }
+            if (!down && pressed) {
+                pressed = false;
+                const int64_t held = now_ms - down_ms;
+                if (held >= 4000) {
+#if HMB_DEEP_SLEEP_SOUND_EMBEDDED
+                    vTaskDelay(pdMS_TO_TICKS(HMB_SLEEP_SOUND_WAIT_MS));
+#endif
+                    EnterDeepSleep(false); // OGG bereits bei 4s gestartet
+                } else if (held >= 1000) {
+                    ESP_LOGI(TAG, "GPIO3 LONG release: interaktives Gespraech");
+                    Application::GetInstance().ToggleChatState();
+                } else if (held >= 40) {
+                    HandleAnsageTestPress();
+                }
+            }
+            // Im One-Shot-Modus bleibt die Mikrofonsteuerung Aufgabe
+            // der Application/AudioService; Long nutzt XiaoZhi ToggleChatState.
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
     void HandleShortPress() {
         auto& app = Application::GetInstance();
         const auto state = app.GetDeviceState();
@@ -1050,12 +1141,19 @@ private:
         if (hmb_night_count < 3) ++hmb_night_count;
         if (valid_time) hmb_night_last_epoch = now;
         ESP_LOGI(TAG, "🌙 Sleep: Aktivierung P%u", unsigned(hmb_night_count));
-        if (hmb_night_count == 1) app.WakeWordInvoke("HMBSLEEP1", true);
-        else if (hmb_night_count == 2) app.WakeWordInvoke("HMBSLEEP2", false);
-        else app.WakeWordInvoke("HMBSLEEP3", false);
+        if (hmb_night_count == 1)
+            app.WakeWordInvoke("HMBSLEEP1", true);   // One-Shot
+        else if (hmb_night_count == 2)
+            app.WakeWordInvoke("HMBSLEEP2", false);  // Dialog
+        else
+            app.WakeWordInvoke("HMBSLEEP3", false);  // Dialog
     }
 
     void ButtonTask() {
+        #if HMB_ANSAGE_TEST_MODE
+                AnsageTestButtonTask();
+                return;
+        #endif
         // Nach Deep-Sleep-Wakeup zuerst das Loslassen abwarten.
         while (gpio_get_level(GPIO_NUM_3) == 0) vTaskDelay(pdMS_TO_TICKS(20));
         bool pressed = false;
@@ -1398,7 +1496,10 @@ public:
         // Die periodischen SystemInfo-Speichermeldungen aus dem Serial-Log ausblenden.
         // Betrifft nur diesen Log-Tag, nicht andere Fehler-/Warnmeldungen.
         esp_log_level_set("SystemInfo", ESP_LOG_NONE);
-        ESP_LOGI(TAG, "🚀 HMBTEC Sleep Companion C3 V0.9.17");
+        ESP_LOGI(TAG, "HMBTEC Sleep Companion C3 V0.9.20");
+        #if HMB_ANSAGE_TEST_MODE
+                ESP_LOGW(TAG, "ANSAGE TEST aktiv: P1 -> P2 -> P3, ohne Board-State-Machine");
+        #endif
         ESP_LOGI(TAG, "🔘 GPIO3: Short / Long / Very-Long; Wakeup aus Deep Sleep");
 
         #if HMB_OLED_ENABLED || HMB_TCS34725_ENABLED

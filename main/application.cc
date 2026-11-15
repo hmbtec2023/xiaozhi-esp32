@@ -1,3 +1,4 @@
+#include "hmb_api_lab.h"
 #include "application.h"
 #include "assets.h"
 #include "assets/lang_config.h"
@@ -61,6 +62,7 @@ Application::~Application() {
 }
 
 bool Application::SetDeviceState(DeviceState state) {
+    HmbApiLab::event("STATE_TRANSITION_REQUEST");
     return state_machine_.TransitionTo(state);
 }
 
@@ -98,6 +100,7 @@ void Application::Initialize() {
     };
 
     callbacks.on_playback_drained = [this]() {
+        HmbApiLab::event("AUDIO_DRAIN_CALLBACK");
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
     };
 
@@ -695,6 +698,7 @@ void Application::InitializeProtocol() {
     }
 
     protocol_->OnConnected([this]() {
+        HmbApiLab::event("CONNECT_READY");
         DismissAlert();
     });
 
@@ -711,6 +715,7 @@ void Application::InitializeProtocol() {
 
     protocol_->OnIncomingAudio(
         [this](std::unique_ptr<AudioStreamPacket> packet) {
+            HmbApiLab::audio_packet();
             if (GetDeviceState() == kDeviceStateSpeaking) {
                 audio_service_.PushPacketToDecodeQueue(
                     std::move(packet)
@@ -721,6 +726,7 @@ void Application::InitializeProtocol() {
 
     protocol_->OnAudioChannelOpened(
         [this, codec, &board]() {
+            HmbApiLab::event("AUDIO_CHANNEL_OPEN");
             board.SetPowerSaveLevel(
                 PowerSaveLevel::PERFORMANCE
             );
@@ -741,6 +747,7 @@ void Application::InitializeProtocol() {
 
     protocol_->OnAudioChannelClosed(
         [this, &board]() {
+            HmbApiLab::event("AUDIO_CHANNEL_CLOSED");
             board.SetPowerSaveLevel(
                 PowerSaveLevel::LOW_POWER
             );
@@ -886,6 +893,7 @@ void Application::InitializeProtocol() {
                 if (strcmp(
                         state->valuestring,
                         "start") == 0) {
+                    HmbApiLab::event("TTS_START");
 
                     Schedule([this]() {
                         aborted_ = false;
@@ -898,6 +906,7 @@ void Application::InitializeProtocol() {
                 } else if (strcmp(
                                state->valuestring,
                                "stop") == 0) {
+                    HmbApiLab::event("TTS_STOP");
 
                     Schedule([this]() {
                         if (GetDeviceState() ==
@@ -1656,6 +1665,7 @@ void Application::BeginWakeWordInvoke(
     const std::string& wake_word,
     bool manual_stop) {
 
+    HmbApiLab::event("CONNECT_START");
     audio_service_.EncodeWakeWord();
 
     if (!SetDeviceState(
@@ -1738,6 +1748,7 @@ void Application::ContinueWakeWordInvoke(
         wake_word
     );
 
+    HmbApiLab::event("SEND_WAKEWORD_DONE");
     SetListeningMode(
         manual_stop
             ? kListeningModeManualStop
@@ -1749,6 +1760,7 @@ void Application::ContinueWakeWordInvoke(
 
     play_popup_on_listening_ = true;
 
+    HmbApiLab::event("SEND_WAKEWORD_DONE");
     SetListeningMode(
         manual_stop
             ? kListeningModeManualStop
