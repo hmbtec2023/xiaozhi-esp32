@@ -35,6 +35,10 @@ LV_FONT_DECLARE(font_noto_emoji_30_4);
 LV_IMAGE_DECLARE(logo_hmbtec_96);
 #endif
 
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+LV_IMAGE_DECLARE(kritzraedt_portrait);
+#endif
+
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
@@ -890,6 +894,14 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
 
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // HMB|TEC Kritzraedt AI: dauerhaftes Vollbildportraet.
+    lv_obj_t* portrait = lv_image_create(screen);
+    lv_image_set_src(portrait, &kritzraedt_portrait);
+    lv_obj_align(portrait, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_remove_flag(portrait, LV_OBJ_FLAG_SCROLLABLE);
+#endif
+
     /* Bottom layer: emoji_box_ - centered display */
     emoji_box_ = lv_obj_create(screen);
     lv_obj_set_size(emoji_box_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -897,6 +909,10 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_all(emoji_box_, 0, 0);
     lv_obj_set_style_border_width(emoji_box_, 0, 0);
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     emoji_label_ = lv_label_create(emoji_box_);
     #if CONFIG_BOARD_TYPE_HMBTEC_LICHTBLICK

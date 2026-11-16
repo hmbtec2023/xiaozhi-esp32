@@ -1,0 +1,9 @@
+{
+    "type": "hmbtec-kritzraedt-s3",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "hmbtec-kritzraedt-s3"
+        }
+    ]
+}

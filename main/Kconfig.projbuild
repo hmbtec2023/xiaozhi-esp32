@@ -257,6 +257,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_HMBTEC_LICHTBLICK
         bool "HMB|TEC Lichtblick"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+        bool "HMB|TEC Kritzraedt AI (ESP32-S3)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_GENJUTECH_S3_1_54TFT
         bool "GenjuTech ESP32-S3 1.54-inch TFT (亘具科技)"
         depends on IDF_TARGET_ESP32S3
