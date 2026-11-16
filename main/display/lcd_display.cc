@@ -1275,9 +1275,11 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
         }
     }
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE
-    // Re-align bottom_bar_ after text change so it stays anchored to the bottom
-    // as its height adapts to the wrapped content.
+    // HMB|TEC: Mehrzeiligen Untertitel korrekt berechnen und zentrieren.
     if (bottom_bar_ != nullptr) {
+        lv_obj_update_layout(chat_message_label_);
+        lv_obj_update_layout(bottom_bar_);
+        lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0);
         lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
     }
 #endif
