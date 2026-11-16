@@ -37,8 +37,21 @@ LV_IMAGE_DECLARE(logo_hmbtec_96);
 
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
 LV_IMAGE_DECLARE(kritzraedt_portrait);
+LV_IMAGE_DECLARE(kritzraedt_mouth_M1);
+LV_IMAGE_DECLARE(kritzraedt_mouth_M2);
 #endif
 
+
+void LcdDisplay::SetAudioLevel(uint8_t level) {
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    avatar_audio_level_.store(
+        level > 100 ? 100 : level,
+        std::memory_order_relaxed
+    );
+#else
+    (void)level;
+#endif
+}
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
@@ -337,6 +350,14 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 }
 
 LcdDisplay::~LcdDisplay() {
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // Avatar-Timer vor dem Entfernen der LVGL-Objekte stoppen.
+    if (avatar_timer_ != nullptr) {
+        lv_timer_delete(avatar_timer_);
+        avatar_timer_ = nullptr;
+    }
+#endif
+
     SetPreviewImage(nullptr);
 
     // Clean up GIF controller
@@ -900,6 +921,72 @@ void LcdDisplay::SetupUI() {
     lv_image_set_src(portrait, &kritzraedt_portrait);
     lv_obj_align(portrait, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_remove_flag(portrait, LV_OBJ_FLAG_SCROLLABLE);
+
+    // HMB|TEC Kritzraedt AI: M1-Mundoverlay (statischer Test).
+    avatar_mouth_ = lv_image_create(screen);
+    lv_obj_t* mouth = avatar_mouth_;
+    lv_image_set_src(mouth, &kritzraedt_mouth_M1);
+    lv_obj_set_pos(mouth, 125, 145);
+    lv_obj_remove_flag(mouth, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(mouth, LV_OBJ_FLAG_HIDDEN);
+
+    // Temporäre Audiopegelanzeige zur Synchronisationsprüfung.
+    avatar_level_bar_ = lv_obj_create(screen);
+    lv_obj_set_size(avatar_level_bar_, 0, 5);
+    lv_obj_align(avatar_level_bar_, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(
+        avatar_level_bar_, lv_color_hex(0x00FF66), 0);
+    lv_obj_set_style_border_width(avatar_level_bar_, 0, 0);
+    lv_obj_set_style_radius(avatar_level_bar_, 0, 0);
+    lv_obj_set_style_pad_all(avatar_level_bar_, 0, 0);
+    lv_obj_remove_flag(avatar_level_bar_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(avatar_level_bar_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(avatar_level_bar_, LV_OBJ_FLAG_HIDDEN);
+
+    // LVGL-Timer: Audiopegel alle 40 ms visualisieren.
+    avatar_timer_ = lv_timer_create(
+        [](lv_timer_t* timer) {
+            auto* self = static_cast<LcdDisplay*>(
+                lv_timer_get_user_data(timer));
+
+            uint8_t level = self->avatar_audio_level_.load(
+                std::memory_order_relaxed);
+
+            int width = (240 * level) / 100;
+            lv_obj_set_width(self->avatar_level_bar_, width);
+
+            // HMB|TEC Kritzraedt AI: dreistufige Lippenanimation.
+            // M0 = Originalportraet, M1/M2 = Mundoeffnungen.
+            static uint8_t mouth_state = 0;
+
+            uint8_t next_state = 0;
+            if (level > 25) {
+                next_state = 2;
+            } else if (level > 6) {
+                next_state = 1;
+            }
+
+            if (next_state != mouth_state) {
+                mouth_state = next_state;
+
+                if (mouth_state == 0) {
+                    lv_obj_add_flag(
+                        self->avatar_mouth_, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_image_set_src(
+                        self->avatar_mouth_,
+                        mouth_state == 1
+                            ? &kritzraedt_mouth_M1
+                            : &kritzraedt_mouth_M2);
+
+                    lv_obj_remove_flag(
+                        self->avatar_mouth_, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+        },
+        40,
+        this
+    );
 #endif
 
     /* Bottom layer: emoji_box_ - centered display */

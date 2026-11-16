@@ -1,3 +1,4 @@
+#include <cmath>
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
@@ -361,6 +362,26 @@ void AudioService::AudioOutputTask() {
         if (task.playback_id != 0 && callbacks_.on_playback_progress) {
             callbacks_.on_playback_progress(task.playback_id, task.media_position_ms);
         }
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+        // HMB|TEC Kritzraedt AI: Sprachpegel fuer Avatar-Mundanimation.
+        if (callbacks_.on_audio_level && !task.pcm.empty()) {
+            uint64_t sum = 0;
+
+            for (int16_t sample : task.pcm) {
+                int32_t value = sample;
+                sum += static_cast<uint64_t>(value * value);
+            }
+
+            double rms = sqrt(static_cast<double>(sum) / task.pcm.size());
+            int level = static_cast<int>(rms * 100.0 / 12000.0);
+
+            if (level > 100) level = 100;
+            if (level < 0) level = 0;
+
+            callbacks_.on_audio_level(static_cast<uint8_t>(level));
+        }
+#endif
 
         codec_->OutputData(task.pcm);
 

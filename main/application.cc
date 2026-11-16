@@ -108,6 +108,13 @@ void Application::Initialize() {
         notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
     };
 
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // HMB|TEC Kritzraedt AI: Audiopegel an Avatar uebergeben.
+    callbacks.on_audio_level = [display](uint8_t level) {
+        display->SetAudioLevel(level);
+    };
+#endif
+
     audio_service_.SetCallbacks(callbacks);
 
     // Add state change listeners

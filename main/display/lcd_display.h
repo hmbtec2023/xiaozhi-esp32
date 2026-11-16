@@ -33,6 +33,16 @@ protected:
 
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
     lv_obj_t* emoji_box_ = nullptr;
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // Threadsichere Pegeluebergabe vom Audio-Task.
+    std::atomic<uint8_t> avatar_audio_level_{0};
+
+    // Kritzraedt AI: Audiopegel-Visualisierung (25 FPS).
+    lv_timer_t* avatar_timer_ = nullptr;
+    lv_obj_t* avatar_level_bar_ = nullptr;
+    lv_obj_t* avatar_mouth_ = nullptr;
+#endif
     lv_obj_t* chat_message_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
@@ -50,6 +60,7 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
+    virtual void SetAudioLevel(uint8_t level) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;

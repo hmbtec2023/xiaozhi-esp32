@@ -927,6 +927,13 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# HMB|TEC Kritzraedt AI: Lippenanimation M2
+if(CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3)
+    list(APPEND SOURCES
+        "boards/hmbtec-kritzraedt-s3/kritzraedt_mouth_M2.c"
+    )
+endif()
+
 # Select one audio engine for each chip family
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4 OR CONFIG_IDF_TARGET_ESP32S31)
     list(APPEND SOURCES "audio/engines/afe_audio_engine.cc")

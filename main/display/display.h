@@ -45,6 +45,8 @@ public:
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string& notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);
+    // HMB|TEC Avatar: Audiopegel 0..100
+    virtual void SetAudioLevel(uint8_t level) { (void)level; }
     void SetEmotionCallback(std::function<void(const char*)> callback);
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void ClearChatMessages();

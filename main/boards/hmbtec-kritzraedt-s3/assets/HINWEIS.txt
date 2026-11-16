@@ -1,0 +1,3 @@
+M0: Originalausschnitt 42x25 Pixel.
+M1-M3: fotorealistische REFERENZBILDER, nicht pixelgenau auf Originalportraet ausgerichtet und NICHT direkt als LVGL-Overlays verwendbar.
+Vor Firmware-Einbindung muessen Mundposition, Perspektive, Beleuchtung und Randuebergaenge angepasst werden.
