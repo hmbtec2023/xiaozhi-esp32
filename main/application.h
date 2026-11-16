@@ -111,6 +111,7 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word, bool manual_stop = false);
+    void QueueWakeWordInvoke(const std::string& wake_word);
     void ColorTalesSwitch(); // Test: Wakeword in bestehender MQTT-Sitzung
     void RegisterOneShotFinishedCallback(std::function<void()> callback);
     void RegisterSttCallback(std::function<void(const std::string&)> callback);
@@ -144,6 +145,9 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
+    // HMB|TEC: Wakeword bis zur Betriebsbereitschaft zwischenspeichern
+    std::string pending_wake_word_;
+    bool activation_completed_ = false;
     bool one_shot_invocation_active_ = false;
     std::function<void()> one_shot_finished_callback_;
     std::function<void(const std::string&)> stt_callback_;

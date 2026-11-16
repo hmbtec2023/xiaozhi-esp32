@@ -1197,8 +1197,32 @@ void LcdDisplay::SetupUI() {
                                     overlay, LV_OBJ_FLAG_HIDDEN);
                             }
 
-                            Application::GetInstance().WakeWordInvoke(
-                                trigger, false);
+                            // Beide Navigationsbuttons ausblenden
+                            lv_obj_t* screen = lv_screen_active();
+                            uint32_t count = lv_obj_get_child_count(screen);
+
+                            for (uint32_t i = 0; i < count; ++i) {
+                                lv_obj_t* child = lv_obj_get_child(screen, i);
+
+                                if (!lv_obj_check_type(child, &lv_button_class))
+                                    continue;
+
+                                lv_obj_t* label = lv_obj_get_child(child, 0);
+                                if (!label ||
+                                    !lv_obj_check_type(label, &lv_label_class))
+                                    continue;
+
+                                const char* text = lv_label_get_text(label);
+
+                                if (strcmp(text, "GLUECKSRAD") == 0 ||
+                                    strcmp(text, "CHAT") == 0) {
+                                    lv_obj_add_flag(
+                                        child, LV_OBJ_FLAG_HIDDEN);
+                                }
+                            }
+
+                            Application::GetInstance().QueueWakeWordInvoke(
+                                trigger);
                         },
                         1500,
                         const_cast<char*>(triggers[selected])
@@ -1230,42 +1254,89 @@ void LcdDisplay::SetupUI() {
     // Overlay fuer automatisches Ausblenden registrieren
     lv_obj_set_user_data(screen, roulette_overlay);
 
-    // HMB|TEC Kritzraedt AI – historisches Fragen-Gluecksrad
-    lv_obj_t* roulette_button = lv_button_create(screen);
-    lv_obj_set_size(roulette_button, 52, 52);
-    lv_obj_align(roulette_button, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+    // HMB|TEC Kritzraedt AI - Hauptnavigation
 
-    lv_obj_set_style_radius(roulette_button, LV_RADIUS_CIRCLE, 0);
+    // Button 1: GLUECKSRAD
+    lv_obj_t* roulette_button = lv_button_create(screen);
+    lv_obj_set_size(roulette_button, 112, 40);
+    lv_obj_align(roulette_button, LV_ALIGN_BOTTOM_LEFT, 5, -8);
+    lv_obj_set_style_radius(roulette_button, 8, 0);
     lv_obj_set_style_bg_color(
         roulette_button, lv_color_hex(0xB88A35), 0);
-    lv_obj_set_style_border_width(roulette_button, 2, 0);
-    lv_obj_set_style_border_color(
-        roulette_button, lv_color_hex(0xF5D78A), 0);
-    lv_obj_remove_flag(roulette_button, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* roulette_label = lv_label_create(roulette_button);
-    lv_label_set_text(roulette_label, "?");
+    lv_label_set_text(roulette_label, "GLUECKSRAD");
+    lv_obj_set_style_text_font(
+        roulette_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(
         roulette_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(roulette_label, &lv_font_montserrat_14, 0);
     lv_obj_center(roulette_label);
 
     lv_obj_add_event_cb(
         roulette_button,
         [](lv_event_t* event) {
-            if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-                lv_obj_t* overlay =
-                    static_cast<lv_obj_t*>(lv_event_get_user_data(event));
-                lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_move_foreground(overlay);
-                ESP_LOGI("KritzraedtRoulette",
-                         "Gluecksrad-Overlay geoeffnet");
-            }
+            lv_obj_t* overlay =
+                static_cast<lv_obj_t*>(lv_event_get_user_data(event));
+            lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(overlay);
         },
         LV_EVENT_CLICKED,
         roulette_overlay
     );
+
+    // Button 2: CHAT
+    lv_obj_t* chat_button = lv_button_create(screen);
+    lv_obj_set_size(chat_button, 112, 40);
+    lv_obj_align(chat_button, LV_ALIGN_BOTTOM_RIGHT, -5, -8);
+    lv_obj_set_style_radius(chat_button, 8, 0);
+    lv_obj_set_style_bg_color(
+        chat_button, lv_color_hex(0xB88A35), 0);
+
+    lv_obj_t* chat_label = lv_label_create(chat_button);
+    lv_label_set_text(chat_label, "CHAT");
+    lv_obj_set_style_text_font(
+        chat_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(
+        chat_label, lv_color_white(), 0);
+    lv_obj_center(chat_label);
+
+    lv_obj_add_event_cb(
+        chat_button,
+        [](lv_event_t* event) {
+            if (lv_event_get_code(event) != LV_EVENT_CLICKED)
+                return;
+
+            ESP_LOGI("KritzraedtChat", "Chat gestartet");
+
+            // Beide Navigationsbuttons ausblenden
+            lv_obj_t* chat_button =
+                static_cast<lv_obj_t*>(lv_event_get_target(event));
+            lv_obj_t* screen = lv_obj_get_parent(chat_button);
+
+            // Beide Navigationsbuttons ausblenden
+            lv_obj_add_flag(chat_button, LV_OBJ_FLAG_HIDDEN);
+
+            lv_obj_t* roulette_button =
+                static_cast<lv_obj_t*>(
+                    lv_obj_get_user_data(chat_button));
+
+            if (roulette_button) {
+                lv_obj_add_flag(
+                    roulette_button, LV_OBJ_FLAG_HIDDEN);
+            }
+
+            Application::GetInstance().ToggleChatState();
+        },
+        LV_EVENT_CLICKED,
+        nullptr
+    );
+
+    // GLUECKSRAD-Button fuer CHAT-Callback hinterlegen
+    lv_obj_set_user_data(chat_button, roulette_button);
+
     lv_obj_move_foreground(roulette_button);
+    lv_obj_move_foreground(chat_button);
+
 #endif
 
 

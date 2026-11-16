@@ -300,6 +300,198 @@ private:
         pixel_ring_->SetAllColor({0, 0, 0});
     }
 
+
+
+    // HMB|TEC Kritzraedt AI - Gluecksrad MCP V0.2
+    void InitializeKritzraedtTools() {
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_kritzraedt",
+            "When the user input is exactly HMBKRITZRAEDT_KRITZRAEDT, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: kritzraedt");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber deinem Leben, deiner Herkunft und deiner Arbeit als Chronist. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_gangelt",
+            "When the user input is exactly HMBKRITZRAEDT_GANGELT, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: gangelt");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber der Geschichte Gangelts und dem Leben seiner Bewohner. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_sittard",
+            "When the user input is exactly HMBKRITZRAEDT_SITTARD, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: sittard");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber der Geschichte Sittards und seiner Bedeutung fuer die Region. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_kirchen",
+            "When the user input is exactly HMBKRITZRAEDT_KIRCHEN, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: kirchen");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber Kirchen, Glauben und religioesem Leben im 17. Jahrhundert. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_alltag",
+            "When the user input is exactly HMBKRITZRAEDT_ALLTAG, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: alltag");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber dem Alltag der Menschen, ihren Familien und Lebensbedingungen. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_handel",
+            "When the user input is exactly HMBKRITZRAEDT_HANDEL, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: handel");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber Handel, Handwerk, Maerkten und Handelswegen. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_geschichte",
+            "When the user input is exactly HMBKRITZRAEDT_GESCHICHTE, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: geschichte");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber wichtigen historischen Ereignissen deiner Zeit. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+        mcp.AddTool(
+            "self.hmbtec.kritzraedt_geheimnisse",
+            "When the user input is exactly HMBKRITZRAEDT_GEHEIMNISSE, "
+            "always call this tool. Execute the returned instruction. "
+            "Do not mention the trigger or tool.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                ESP_LOGI(TAG, "Kritzraedt MCP: geheimnisse");
+
+                return std::string(
+                    "Du bist Jacobus Kritzraedt, Chronist des "
+                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
+                    "eine historische Erzaehlung ueber historischen Raetseln, Legenden und ungewoehnlichen Begebenheiten. "
+                    "Sprich in der Ich-Form und auf Deutsch. "
+                    "Erzaehle lebendig und historisch glaubwuerdig. "
+                    "Erfinde keine historischen Fakten. "
+                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
+                    "Stelle anschliessend eine passende Frage "
+                    "und warte auf die Antwort des Besuchers."
+                );
+            }
+        );
+
+    }
+
     void InitializeTools() {
         static BuzzerController buzzer(HMBTEC_BUZZER_GPIO);
 
@@ -329,6 +521,7 @@ public:
         // InitializeBuzzer(); // Kritzraedt: nicht benötigt // HMB
         // InitializePixelRing(); // Kritzraedt: nicht benötigt // HMB
         // InitializeTools(); // Kritzraedt: nicht benötigt
+        InitializeKritzraedtTools();
         GetBacklight()->SetBrightness(100);
     }
 

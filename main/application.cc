@@ -428,11 +428,51 @@ void Application::HandleNetworkDisconnectedEvent() {
     display->UpdateStatusBar(true);
 }
 
+
+void Application::QueueWakeWordInvoke(const std::string& wake_word) {
+    bool ready = false;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        ready = activation_completed_ && protocol_ != nullptr;
+
+        if (!ready) {
+            pending_wake_word_ = wake_word;
+        }
+    }
+
+    if (ready) {
+        ESP_LOGI(TAG, "Kritzraedt: Trigger sofort: %s",
+                 wake_word.c_str());
+        WakeWordInvoke(wake_word, false);
+    } else {
+        ESP_LOGI(TAG, "Kritzraedt: Trigger gespeichert: %s",
+                 wake_word.c_str());
+    }
+}
+
 void Application::HandleActivationDoneEvent() {
     ESP_LOGI(TAG, "Activation done");
 
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);
+
+    // HMB|TEC: Gespeicherten Gluecksrad-Trigger freigeben
+    std::string pending_trigger;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        activation_completed_ = true;
+        pending_trigger.swap(pending_wake_word_);
+    }
+
+    if (!pending_trigger.empty()) {
+        ESP_LOGI(TAG, "Kritzraedt: Trigger nach Aktivierung: %s",
+                 pending_trigger.c_str());
+
+        WakeWordInvoke(pending_trigger, false);
+    }
 
     has_server_time_ = ota_->HasServerTime();
 
