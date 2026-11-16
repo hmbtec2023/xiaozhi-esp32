@@ -1,5 +1,6 @@
 #include "hmb_api_lab.h"
 #include "application.h"
+#include "display/lcd_display.h"
 #include "assets.h"
 #include "assets/lang_config.h"
 #include "audio_codec.h"
@@ -19,6 +20,14 @@
 #include <cJSON.h>
 #include <cstring>
 #include <limits>
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+extern const uint8_t kritzraedt_intro_ogg_start[]
+    asm("_binary_KRITZRAEDT_INTRO_ogg_start");
+extern const uint8_t kritzraedt_intro_ogg_end[]
+    asm("_binary_KRITZRAEDT_INTRO_ogg_end");
+#endif
+
 
 #define TAG "Application"
 
@@ -116,6 +125,20 @@ void Application::Initialize() {
 #endif
 
     audio_service_.SetCallbacks(callbacks);
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // Gastgeberinnenansage: Jacobus behaelt den Mund geschlossen.
+    kritzraedt_intro_active_ = true;
+    display->SetHideSubtitle(true);
+    static_cast<LcdDisplay*>(display)->SetAvatarMouthLocked(true);
+
+    // Lokale Gastgeberinnen-Begruessung vor der Netzwerkaktivierung.
+    audio_service_.PlaySound(std::string_view(
+        reinterpret_cast<const char*>(kritzraedt_intro_ogg_start),
+        kritzraedt_intro_ogg_end - kritzraedt_intro_ogg_start
+    ));
+#endif
+
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -273,6 +296,19 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_PLAYBACK_DRAINED) {
             if (audio_service_.IsPlaybackIdle()) {
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+                // Mund nach Ende der lokalen Begruessung freigeben.
+                static_cast<LcdDisplay*>(
+                    Board::GetInstance().GetDisplay()
+                )->SetAvatarMouthLocked(false);
+
+                if (kritzraedt_intro_active_) {
+                    kritzraedt_intro_active_ = false;
+                    auto* display = Board::GetInstance().GetDisplay();
+                    display->SetHideSubtitle(false);
+                    ESP_LOGI(TAG, "Kritzraedt: Startansage beendet, Untertitel freigegeben");
+                }
+#endif
                 notify_player_.OnPlaybackDrained();
             }
 
@@ -420,7 +456,9 @@ void Application::HandleActivationDoneEvent() {
 
     if (!has_error) {
         Schedule([this]() {
+            #if !CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
             audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+#endif
         });
     }
 }

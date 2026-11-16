@@ -37,6 +37,7 @@ protected:
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
     // Threadsichere Pegeluebergabe vom Audio-Task.
     std::atomic<uint8_t> avatar_audio_level_{0};
+    std::atomic<bool> avatar_mouth_locked_{false};
 
     // Kritzraedt AI: Audiopegel-Visualisierung (25 FPS).
     lv_timer_t* avatar_timer_ = nullptr;
@@ -61,6 +62,9 @@ public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetAudioLevel(uint8_t level) override;
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    void SetAvatarMouthLocked(bool locked);
+#endif
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;

@@ -1096,6 +1096,23 @@ if(CONFIG_BOARD_TYPE_HMBTEC_EINSCHLAF_COACH_C3)
     message(STATUS "HMB Einschlaf-Coach: CHAT_START.ogg und DEEP_SLEEP.ogg eingebettet")
 endif()
 
+# HMB|TEC Kritzraedt AI: lokale Gastgeberinnen-Begruessung
+set(HMB_KRITZRAEDT_EMBED_FILES "")
+
+if(CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3)
+    set(HMB_INTRO_REL "assets/locales/de-DE/KRITZRAEDT_INTRO.ogg")
+    set(HMB_INTRO_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${HMB_INTRO_REL}")
+
+    if(NOT EXISTS "${HMB_INTRO_ABS}")
+        message(FATAL_ERROR "Kritzraedt Intro fehlt: ${HMB_INTRO_ABS}")
+    endif()
+
+    list(REMOVE_ITEM LANG_SOUNDS "${HMB_INTRO_ABS}")
+    list(APPEND HMB_KRITZRAEDT_EMBED_FILES "${HMB_INTRO_REL}")
+
+    message(STATUS "HMB Kritzraedt: Intro-OGG wird eingebettet")
+endif()
+
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 
 # If target chip is ESP32, exclude specific files to avoid build errors
@@ -1153,7 +1170,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${HMB_COLORTALES_EMBED_FILES} ${HMB_SLEEP_COACH_EMBED_FILES}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${HMB_COLORTALES_EMBED_FILES} ${HMB_SLEEP_COACH_EMBED_FILES} ${HMB_KRITZRAEDT_EMBED_FILES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES

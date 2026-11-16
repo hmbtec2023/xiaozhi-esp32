@@ -1,3 +1,4 @@
+#include "esp_random.h"
 #include "lcd_display.h"
 #include "assets/lang_config.h"
 #include "gif/lvgl_gif.h"
@@ -36,16 +37,30 @@ LV_IMAGE_DECLARE(logo_hmbtec_96);
 #endif
 
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+#include "application.h"
+#endif
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
 LV_IMAGE_DECLARE(kritzraedt_portrait);
 LV_IMAGE_DECLARE(kritzraedt_mouth_M1);
 LV_IMAGE_DECLARE(kritzraedt_mouth_M2);
 #endif
 
 
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+void LcdDisplay::SetAvatarMouthLocked(bool locked) {
+    avatar_mouth_locked_.store(locked, std::memory_order_relaxed);
+    if (locked) {
+        avatar_audio_level_.store(0, std::memory_order_relaxed);
+    }
+}
+#endif
+
 void LcdDisplay::SetAudioLevel(uint8_t level) {
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
     avatar_audio_level_.store(
-        level > 100 ? 100 : level,
+        avatar_mouth_locked_.load(std::memory_order_relaxed)
+            ? 0 : (level > 100 ? 100 : level),
         std::memory_order_relaxed
     );
 #else
@@ -989,6 +1004,272 @@ void LcdDisplay::SetupUI() {
     );
 #endif
 
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // Acht Themen des historischen Kritzraedt-Gluecksrads
+    static constexpr const char* roulette_topics[] = {
+        "Kritzraedt",
+        "Gangelt",
+        "Sittard",
+        "Kirchen",
+        "Alltag",
+        "Handel",
+        "Geschichte",
+        "Geheimnisse"
+    };
+
+    // Historisches Gluecksrad: Overlay
+    lv_obj_t* roulette_overlay = lv_obj_create(screen);
+    lv_obj_set_size(roulette_overlay, 240, 320);
+    lv_obj_center(roulette_overlay);
+    lv_obj_set_style_bg_color(
+        roulette_overlay, lv_color_hex(0x18130D), 0);
+    lv_obj_set_style_bg_opa(roulette_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(roulette_overlay, 0, 0);
+    lv_obj_set_style_radius(roulette_overlay, 0, 0);
+    lv_obj_set_scrollbar_mode(roulette_overlay, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(roulette_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* roulette_title = lv_label_create(roulette_overlay);
+    lv_label_set_text(roulette_title, "Gluecksrad");
+    lv_obj_set_style_text_font(
+        roulette_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(
+        roulette_title, lv_color_hex(0xF5D78A), 0);
+    lv_obj_align(roulette_title, LV_ALIGN_TOP_MID, 0, 12);
+
+    // Gluecksrad mit acht farbigen Kreissegmenten
+    lv_obj_t* roulette_wheel = lv_obj_create(roulette_overlay);
+    lv_obj_set_size(roulette_wheel, 190, 190);
+    lv_obj_align(roulette_wheel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_opa(roulette_wheel, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(roulette_wheel, 0, 0);
+    lv_obj_set_style_pad_all(roulette_wheel, 0, 0);
+    lv_obj_remove_flag(roulette_wheel, LV_OBJ_FLAG_SCROLLABLE);
+
+    static constexpr uint32_t roulette_colors[8] = {
+        0x9B342B, 0xC39A47, 0x315B57, 0x75543D,
+        0x9B342B, 0xC39A47, 0x315B57, 0x75543D
+    };
+
+    for (int i = 0; i < 8; ++i) {
+        lv_obj_t* segment = lv_arc_create(roulette_wheel);
+        lv_obj_set_size(segment, 180, 180);
+        lv_obj_center(segment);
+
+        lv_arc_set_rotation(segment, i * 45);
+        lv_arc_set_angles(segment, 0, 45);
+        lv_arc_set_bg_angles(segment, 0, 0);
+
+        lv_obj_set_style_arc_width(segment, 90, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(
+            segment, lv_color_hex(roulette_colors[i]),
+            LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(
+            segment, false, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(segment, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_arc_opa(segment, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(segment, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(segment, LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_set_style_border_opa(segment, LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_set_style_shadow_opa(segment, LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_remove_flag(segment, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    // Themenbeschriftungen innerhalb der acht Segmente
+    static constexpr const char* roulette_short_labels[8] = {
+        "J.K.", "Gangelt", "Sittard", "Kirche",
+        "Alltag", "Handel", "Historie", "Raetsel"
+    };
+
+    // Positionen relativ zur Radmitte, im Uhrzeigersinn
+    static constexpr int16_t label_x[8] = {
+         24,  49,  49,  24, -24, -49, -49, -24
+    };
+    static constexpr int16_t label_y[8] = {
+        -60, -24,  24,  60,  60,  24, -24, -60
+    };
+
+    for (int i = 0; i < 8; ++i) {
+        lv_obj_t* label = lv_label_create(roulette_wheel);
+        lv_label_set_text(label, roulette_short_labels[i]);
+        lv_obj_set_style_text_font(
+            label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(
+            label, lv_color_white(), 0);
+        lv_obj_set_style_text_align(
+            label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(
+            label, LV_ALIGN_CENTER, label_x[i], label_y[i]);
+    }
+
+    // Test: Gesamtes Gluecksrad um 45 Grad drehen
+    lv_obj_set_style_transform_pivot_x(roulette_wheel, 95, 0);
+    lv_obj_set_style_transform_pivot_y(roulette_wheel, 95, 0);
+    lv_obj_set_style_transform_rotation(roulette_wheel, 0, 0);
+
+    // Gluecksrad: Drehung per Touch starten
+    lv_obj_add_flag(roulette_wheel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_add_event_cb(
+        roulette_wheel,
+        [](lv_event_t* event) {
+            if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+
+            lv_obj_t* wheel =
+                static_cast<lv_obj_t*>(lv_event_get_target(event));
+
+            lv_anim_delete(wheel, nullptr);
+
+            lv_anim_t anim;
+            lv_anim_init(&anim);
+            lv_anim_set_var(&anim, wheel);
+            // Zufaelliges Themenfeld (0 bis 7)
+            const int sector = esp_random() % 8;
+
+            // Fuenf Umdrehungen plus zufaelliger Endwinkel
+            // Sektorzentrum exakt unter den oberen Zeiger drehen
+            // LVGL verwendet Winkel in 0,1 Grad
+            const int32_t end_angle =
+                18000 + 3600 - 225 - sector * 450;
+
+            lv_anim_set_values(&anim, 0, end_angle);
+
+            ESP_LOGI("KritzraedtRoulette",
+                     "Zielsektor: %d, Endwinkel: %ld",
+                     sector, static_cast<long>(end_angle));
+            lv_anim_set_duration(&anim, 3000);
+            lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+
+            lv_anim_set_exec_cb(
+                &anim,
+                [](void* obj, int32_t angle) {
+                    lv_obj_set_style_transform_rotation(
+                        static_cast<lv_obj_t*>(obj), angle, 0);
+                }
+            );
+
+            // Ausgewaehltes Thema nach Drehende an XiaoZhi senden
+            lv_anim_set_completed_cb(
+                &anim,
+                [](lv_anim_t* finished) {
+                    lv_obj_t* wheel =
+                        static_cast<lv_obj_t*>(finished->var);
+
+                    const int32_t angle =
+                        lv_obj_get_style_transform_rotation(wheel, LV_PART_MAIN);
+
+                    const int32_t normalized =
+                        ((angle % 3600) + 3600) % 3600;
+
+                    const int selected =
+                        ((3600 - normalized - 225 + 3600) % 3600) / 450;
+
+                    static constexpr const char* triggers[8] = {
+                        "HMBKRITZRAEDT_KRITZRAEDT",
+                        "HMBKRITZRAEDT_GANGELT",
+                        "HMBKRITZRAEDT_SITTARD",
+                        "HMBKRITZRAEDT_KIRCHEN",
+                        "HMBKRITZRAEDT_ALLTAG",
+                        "HMBKRITZRAEDT_HANDEL",
+                        "HMBKRITZRAEDT_GESCHICHTE",
+                        "HMBKRITZRAEDT_GEHEIMNISSE"
+                    };
+
+                    ESP_LOGI("KritzraedtRoulette",
+                             "Thema gewaehlt: %d", selected);
+
+                    lv_timer_t* timer = lv_timer_create(
+                        [](lv_timer_t* timer) {
+                            const char* trigger =
+                                static_cast<const char*>(
+                                    lv_timer_get_user_data(timer));
+
+                            lv_timer_delete(timer);
+
+                            // Gluecksrad ausblenden und Avatar anzeigen
+                            lv_obj_t* overlay =
+                                static_cast<lv_obj_t*>(
+                                    lv_obj_get_user_data(
+                                        lv_screen_active()));
+
+                            if (overlay) {
+                                lv_obj_add_flag(
+                                    overlay, LV_OBJ_FLAG_HIDDEN);
+                            }
+
+                            Application::GetInstance().WakeWordInvoke(
+                                trigger, false);
+                        },
+                        1500,
+                        const_cast<char*>(triggers[selected])
+                    );
+
+                    lv_timer_set_repeat_count(timer, 1);
+                }
+            );
+
+            lv_anim_start(&anim);
+            ESP_LOGI("KritzraedtRoulette", "Gluecksrad dreht");
+        },
+        LV_EVENT_CLICKED,
+        nullptr
+    );
+
+    // Goldener Auswahlzeiger – bleibt bei der Drehung fest
+    lv_obj_t* roulette_pointer = lv_label_create(roulette_overlay);
+    lv_label_set_text(roulette_pointer, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_font(
+        roulette_pointer, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(
+        roulette_pointer, lv_color_hex(0xF5D78A), 0);
+    lv_obj_align(roulette_pointer, LV_ALIGN_CENTER, 0, -104);
+    lv_obj_move_foreground(roulette_pointer);
+
+    lv_obj_add_flag(roulette_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    // Overlay fuer automatisches Ausblenden registrieren
+    lv_obj_set_user_data(screen, roulette_overlay);
+
+    // HMB|TEC Kritzraedt AI – historisches Fragen-Gluecksrad
+    lv_obj_t* roulette_button = lv_button_create(screen);
+    lv_obj_set_size(roulette_button, 52, 52);
+    lv_obj_align(roulette_button, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+
+    lv_obj_set_style_radius(roulette_button, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(
+        roulette_button, lv_color_hex(0xB88A35), 0);
+    lv_obj_set_style_border_width(roulette_button, 2, 0);
+    lv_obj_set_style_border_color(
+        roulette_button, lv_color_hex(0xF5D78A), 0);
+    lv_obj_remove_flag(roulette_button, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* roulette_label = lv_label_create(roulette_button);
+    lv_label_set_text(roulette_label, "?");
+    lv_obj_set_style_text_color(
+        roulette_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(roulette_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(roulette_label);
+
+    lv_obj_add_event_cb(
+        roulette_button,
+        [](lv_event_t* event) {
+            if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+                lv_obj_t* overlay =
+                    static_cast<lv_obj_t*>(lv_event_get_user_data(event));
+                lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(overlay);
+                ESP_LOGI("KritzraedtRoulette",
+                         "Gluecksrad-Overlay geoeffnet");
+            }
+        },
+        LV_EVENT_CLICKED,
+        roulette_overlay
+    );
+    lv_obj_move_foreground(roulette_button);
+#endif
+
+
+
     /* Bottom layer: emoji_box_ - centered display */
     emoji_box_ = lv_obj_create(screen);
     lv_obj_set_size(emoji_box_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -1154,7 +1435,7 @@ void LcdDisplay::SetupUI() {
     static lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_delay(&a, 1000);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_repeat_count(&a, 1);
     lv_obj_set_style_anim(chat_message_label_, &a, LV_PART_MAIN);
     lv_obj_set_style_anim_duration(chat_message_label_, lv_anim_speed_clamped(60, 300, 60000),
                                    LV_PART_MAIN);
@@ -1211,6 +1492,11 @@ void LcdDisplay::SetupUI() {
             }
         }, 200, radar_label);
     #endif
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    // Gluecksrad-Button ueber allen anderen UI-Elementen anzeigen.
+    lv_obj_move_foreground(roulette_button);
+#endif
 }
 
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {

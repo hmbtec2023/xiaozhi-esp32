@@ -6,6 +6,8 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
 #include "display/lcd_display.h"
+#include <esp_lvgl_port.h>
+#include <lvgl.h>
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -28,6 +30,28 @@
 #include "light_controller.h"
 
 #define TAG "HmbtecKritzraedt"
+
+// HMB|TEC Kritzraedt – Touchstatus fuer LVGL 9
+static portMUX_TYPE touch_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static struct {
+    bool pressed = false;
+    uint16_t x = 0;
+    uint16_t y = 0;
+} lv_touch_state;
+
+static void KritzraedtTouchRead(lv_indev_t *indev,
+                               lv_indev_data_t *data) {
+    (void)indev;
+
+    portENTER_CRITICAL(&touch_mux);
+    data->state = lv_touch_state.pressed
+        ? LV_INDEV_STATE_PRESSED
+        : LV_INDEV_STATE_RELEASED;
+    data->point.x = lv_touch_state.x;
+    data->point.y = lv_touch_state.y;
+    portEXIT_CRITICAL(&touch_mux);
+}
 
 class TouchDriver {
 public:
@@ -89,13 +113,24 @@ private:
         while (true) {
             bool touched = false;
             uint16_t x = 0, y = 0;
-            self->touch_.Read(touched, x, y);
+            bool read_ok = self->touch_.Read(touched, x, y);
+
+            if (read_ok) {
+                portENTER_CRITICAL(&touch_mux);
+                lv_touch_state.pressed = touched;
+                if (touched) {
+                    lv_touch_state.x = x;
+                    lv_touch_state.y = y;
+                }
+                portEXIT_CRITICAL(&touch_mux);
+            }
 
             uint32_t now = esp_timer_get_time() / 1000;
 
             if (touched && !down) {
                 down = true;
                 down_start = now;
+                ESP_LOGI(TAG, "TOUCH RAW: X=%u Y=%u", x, y);
             }
 
             if (!touched && down) {
@@ -117,8 +152,33 @@ private:
     }
 
     void InitializeTouch() {
-        if (!touch_.Init(codec_i2c_bus_, 0x38)) return;
-        xTaskCreatePinnedToCore(TouchTask, "touch_task", 4096, this, 5, nullptr, 0);
+        if (!touch_.Init(codec_i2c_bus_, 0x38)) {
+            ESP_LOGE(TAG, "Touchcontroller 0x38 nicht gefunden");
+            return;
+        }
+
+        // LVGL 9: Touchscreen als Pointer registrieren
+        if (lvgl_port_lock(1000)) {
+            lv_indev_t* indev = lv_indev_create();
+
+            if (indev != nullptr) {
+                lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+                lv_indev_set_read_cb(indev, KritzraedtTouchRead);
+                lv_indev_set_display(indev, lv_display_get_default());
+
+                ESP_LOGI(TAG, "LVGL Touch registriert: 240x320");
+            } else {
+                ESP_LOGE(TAG, "LVGL Touchregistrierung fehlgeschlagen");
+            }
+
+            lvgl_port_unlock();
+        } else {
+            ESP_LOGE(TAG, "LVGL Lock fehlgeschlagen");
+        }
+
+        xTaskCreatePinnedToCore(
+            TouchTask, "touch_task", 4096, this, 5, nullptr, 0
+        );
     }
 
     void InitializeI2c() {
