@@ -1,5 +1,10 @@
 #include "hmb_api_lab.h"
 #include "application.h"
+#include "sdkconfig.h"
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+#include "boards/hmbtec-kritzraedt-s3/hmb_museumguide_beacon.h"
+#endif
 #include "display/lcd_display.h"
 #include "assets.h"
 #include "assets/lang_config.h"
@@ -454,6 +459,10 @@ void Application::QueueWakeWordInvoke(const std::string& wake_word) {
 
 void Application::HandleActivationDoneEvent() {
     ESP_LOGI(TAG, "Activation done");
+
+#if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    HmbMuseumGuideBeacon::Start();
+#endif
 
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);

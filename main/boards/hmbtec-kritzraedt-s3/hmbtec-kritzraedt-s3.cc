@@ -11,6 +11,9 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#ifdef NFC_EN
+#include "hmb_talkcard_nfc.h"
+#endif
 #include "mcp_server.h"
 #include "adc_battery_monitor.h"
 
@@ -91,12 +94,117 @@ private:
 class HmbtecKritzraedt : public WifiBoard {
 private:
     Button boot_button_;
-    Button lichtblick_button_;
     CircularStrip* pixel_ring_ = nullptr;
     HmbtecLightController* light_controller_ = nullptr;
     LcdDisplay *display_;
     i2c_master_bus_handle_t codec_i2c_bus_;
     TouchDriver touch_;
+#ifdef NFC_EN
+    HmbTalkCardNfc nfc_;
+    bool nfc_ready_ = false;
+    static void NfcTask(void* arg) {
+        static_cast<HmbtecKritzraedt*>(arg)->NfcLoop();
+    }
+    void NfcLoop() {
+    static const char* triggers[8] = {
+        "HMBKRITZRAEDT_KRITZRAEDT",
+        "HMBKRITZRAEDT_GANGELT",
+        "HMBKRITZRAEDT_SITTARD",
+        "HMBKRITZRAEDT_KIRCHEN",
+        "HMBKRITZRAEDT_ALLTAG",
+        "HMBKRITZRAEDT_HANDEL",
+        "HMBKRITZRAEDT_GESCHICHTE",
+        "HMBKRITZRAEDT_GEHEIMNISSE"
+    };
+
+    std::string previous_uid;
+    int misses = 0;
+
+    while (true) {
+        std::string uid;
+
+        if (nfc_.detect(uid)) {
+            misses = 0;
+
+            if (uid != previous_uid) {
+                previous_uid = uid;
+
+                ESP_LOGI(TAG, "NFC UID=%s", uid.c_str());
+
+                uint8_t payload[256] = {};
+                size_t payload_len = 0;
+
+                if (nfc_.read_payload(
+                        payload, sizeof(payload), payload_len)) {
+
+                    // NDEF Text Record:
+                    // 03 LEN D1 01 ... 54 02 65 6E room=6 ...
+                    // Nur den Textparameter room auswerten.
+
+                    std::string data(
+                        reinterpret_cast<const char*>(payload),
+                        payload_len
+                    );
+
+                    size_t pos = data.find("room=");
+
+                    if (pos != std::string::npos) {
+                        pos += 5;
+
+                        if (pos < data.size() &&
+                            data[pos] >= '1' &&
+                            data[pos] <= '8' &&
+                            (pos + 1 == data.size() ||
+                             data[pos + 1] < '0' ||
+                             data[pos + 1] > '9')) {
+
+                            int room = data[pos] - '0';
+
+                            const char* trigger =
+                                triggers[room - 1];
+
+                            ESP_LOGI(
+                                TAG,
+                                "NFC ROOM=%d -> %s",
+                                room,
+                                trigger
+                            );
+
+                            Application::GetInstance()
+                                .QueueWakeWordInvoke(trigger);
+
+                        } else {
+                            ESP_LOGW(
+                                TAG,
+                                "NFC: ungueltiger room-Wert"
+                            );
+                        }
+                    } else {
+                        ESP_LOGW(
+                            TAG,
+                            "NFC: kein room-Parameter"
+                        );
+                    }
+                }
+            }
+
+        } else if (++misses >= 5) {
+            previous_uid.clear();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
+
+    void InitializeNfc() {
+        nfc_ready_ = nfc_.begin();
+        if (nfc_ready_) {
+            xTaskCreate(NfcTask, "kritz_nfc", 4096, this, 4, nullptr);
+        } else {
+            ESP_LOGE(TAG, "RC522-Initialisierung fehlgeschlagen");
+        }
+    }
+#endif
     AdcBatteryMonitor* adc_battery_monitor_;
 
     void InitializeBatteryMonitor() {
@@ -217,12 +325,7 @@ private:
             app.ToggleChatState();
         });
 
-        lichtblick_button_.OnPressDown([this]() {
-            ESP_LOGI(TAG, "Lichtblick button pressed -> AI prompt");
 
-            auto &app = Application::GetInstance();
-            app.WakeWordInvoke("Lichtblick", true);
-        });
     }
 
     void InitializeLcdDisplay() {
@@ -308,184 +411,226 @@ private:
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_kritzraedt",
-            "When the user input is exactly HMBKRITZRAEDT_KRITZRAEDT, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_KRITZRAEDT, always "
+            "call this tool. Topic: Leben und Chronik des Jacobus Kritzraedt, "
+            "nicht eine allgemeine Stadtgeschichte. Execute the returned "
+            "instruction. Do not mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: kritzraedt");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber deinem Leben, deiner Herkunft und deiner Arbeit als Chronist. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: dein eigenes Leben als Jacobus Kritzraedt "
+                    "(1602-1672), deine Arbeit als Chronist, deine Quellen und deine "
+                    "Sicht auf die damalige Zeit. Trenne belegte biografische Angaben "
+                    "von Vermutungen. Beginne unmittelbar mit einer lebendigen "
+                    "historischen Erzaehlung in der Ich-Form und auf Deutsch. Sprich "
+                    "aus der historischen Perspektive, ohne vorzugeben, unbelegte "
+                    "Ereignisse selbst erlebt zu haben. Erfinde keine Fakten, Zitate "
+                    "oder Quellen. Kennzeichne Unsicherheiten und vermeide "
+                    "Anachronismen. Bleibe beim gewaehlten Thema, auch wenn einzelne "
+                    "Woerter mehrdeutig sind. Die Erzaehlung soll etwa 30 bis 45 "
+                    "Sekunden dauern. Stelle anschliessend genau eine passende offene "
+                    "Frage und warte auf die Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_gangelt",
-            "When the user input is exactly HMBKRITZRAEDT_GANGELT, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_GANGELT, always call "
+            "this tool. Topic: Ortsgeschichte von Gangelt, nicht Sittard oder "
+            "die Biografie allein. Execute the returned instruction. Do not "
+            "mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: gangelt");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber der Geschichte Gangelts und dem Leben seiner Bewohner. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: Gangelt im 17. Jahrhundert: den Ort, seine "
+                    "Bewohner, lokale Lebensverhaeltnisse und historisch belegte "
+                    "Entwicklungen. Bleibe bei Gangelt; erwaehne andere Orte nur zum "
+                    "Verstaendnis. Beginne unmittelbar mit einer lebendigen "
+                    "historischen Erzaehlung in der Ich-Form und auf Deutsch. Sprich "
+                    "aus der historischen Perspektive, ohne vorzugeben, unbelegte "
+                    "Ereignisse selbst erlebt zu haben. Erfinde keine Fakten, Zitate "
+                    "oder Quellen. Kennzeichne Unsicherheiten und vermeide "
+                    "Anachronismen. Bleibe beim gewaehlten Thema, auch wenn einzelne "
+                    "Woerter mehrdeutig sind. Die Erzaehlung soll etwa 30 bis 45 "
+                    "Sekunden dauern. Stelle anschliessend genau eine passende offene "
+                    "Frage und warte auf die Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_sittard",
-            "When the user input is exactly HMBKRITZRAEDT_SITTARD, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_SITTARD, always call "
+            "this tool. Topic: Geschichte der Stadt Sittard, nicht Gangelt. "
+            "Execute the returned instruction. Do not mention the trigger or "
+            "tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: sittard");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber der Geschichte Sittards und seiner Bedeutung fuer die Region. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: Sittard im 17. Jahrhundert: Stadtleben, "
+                    "regionale Verbindungen und historisch belegte Entwicklungen. "
+                    "Bleibe bei Sittard und unterscheide damalige Verhaeltnisse von "
+                    "heutigen. Beginne unmittelbar mit einer lebendigen historischen "
+                    "Erzaehlung in der Ich-Form und auf Deutsch. Sprich aus der "
+                    "historischen Perspektive, ohne vorzugeben, unbelegte Ereignisse "
+                    "selbst erlebt zu haben. Erfinde keine Fakten, Zitate oder Quellen. "
+                    "Kennzeichne Unsicherheiten und vermeide Anachronismen. Bleibe beim "
+                    "gewaehlten Thema, auch wenn einzelne Woerter mehrdeutig sind. Die "
+                    "Erzaehlung soll etwa 30 bis 45 Sekunden dauern. Stelle "
+                    "anschliessend genau eine passende offene Frage und warte auf die "
+                    "Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_kirchen",
-            "When the user input is exactly HMBKRITZRAEDT_KIRCHEN, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_KIRCHEN, always call "
+            "this tool. Topic: Kirchen und religioeses Leben im 17. "
+            "Jahrhundert, nicht moderne Kirchenpolitik. Execute the returned "
+            "instruction. Do not mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: kirchen");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber Kirchen, Glauben und religioesem Leben im 17. Jahrhundert. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: Kirchen, Glaubensalltag und religioese "
+                    "Einrichtungen im 17. Jahrhundert in der Region Gangelt und "
+                    "Sittard. Unterscheide belegte Bau- und Ortsgeschichte von "
+                    "allgemeinen Braeuchen. Beginne unmittelbar mit einer lebendigen "
+                    "historischen Erzaehlung in der Ich-Form und auf Deutsch. Sprich "
+                    "aus der historischen Perspektive, ohne vorzugeben, unbelegte "
+                    "Ereignisse selbst erlebt zu haben. Erfinde keine Fakten, Zitate "
+                    "oder Quellen. Kennzeichne Unsicherheiten und vermeide "
+                    "Anachronismen. Bleibe beim gewaehlten Thema, auch wenn einzelne "
+                    "Woerter mehrdeutig sind. Die Erzaehlung soll etwa 30 bis 45 "
+                    "Sekunden dauern. Stelle anschliessend genau eine passende offene "
+                    "Frage und warte auf die Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_alltag",
-            "When the user input is exactly HMBKRITZRAEDT_ALLTAG, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_ALLTAG, always call "
+            "this tool. Topic: Alltagsleben im 17. Jahrhundert, nicht heutige "
+            "Tagesnachrichten. Execute the returned instruction. Do not mention "
+            "the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: alltag");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber dem Alltag der Menschen, ihren Familien und Lebensbedingungen. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: Alltagsleben der Menschen im 17. Jahrhundert "
+                    "in der Region: Familie, Wohnen, Ernaehrung, Arbeit und soziale "
+                    "Unterschiede. Vermeide moderne Verhaeltnisse als historische "
+                    "Tatsachen. Beginne unmittelbar mit einer lebendigen historischen "
+                    "Erzaehlung in der Ich-Form und auf Deutsch. Sprich aus der "
+                    "historischen Perspektive, ohne vorzugeben, unbelegte Ereignisse "
+                    "selbst erlebt zu haben. Erfinde keine Fakten, Zitate oder Quellen. "
+                    "Kennzeichne Unsicherheiten und vermeide Anachronismen. Bleibe beim "
+                    "gewaehlten Thema, auch wenn einzelne Woerter mehrdeutig sind. Die "
+                    "Erzaehlung soll etwa 30 bis 45 Sekunden dauern. Stelle "
+                    "anschliessend genau eine passende offene Frage und warte auf die "
+                    "Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_handel",
-            "When the user input is exactly HMBKRITZRAEDT_HANDEL, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_HANDEL, always call "
+            "this tool. Topic: Warenhandel und Maerkte im 17. Jahrhundert, "
+            "ausdruecklich nicht der Komponist Georg Friedrich Haendel. Execute "
+            "the returned instruction. Do not mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: handel");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber Handel, Handwerk, Maerkten und Handelswegen. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: Warenhandel und Wirtschaft im 17. Jahrhundert "
+                    "in Gangelt, Sittard und Umgebung: Kaufleute, Maerkte, Waren, "
+                    "Handwerk und Handelswege. Mit Handel ist Warenhandel gemeint, "
+                    "NICHT Georg Friedrich Haendel, Musik oder Oper. Beginne "
+                    "unmittelbar mit einer lebendigen historischen Erzaehlung in der "
+                    "Ich-Form und auf Deutsch. Sprich aus der historischen Perspektive, "
+                    "ohne vorzugeben, unbelegte Ereignisse selbst erlebt zu haben. "
+                    "Erfinde keine Fakten, Zitate oder Quellen. Kennzeichne "
+                    "Unsicherheiten und vermeide Anachronismen. Bleibe beim gewaehlten "
+                    "Thema, auch wenn einzelne Woerter mehrdeutig sind. Die Erzaehlung "
+                    "soll etwa 30 bis 45 Sekunden dauern. Stelle anschliessend genau "
+                    "eine passende offene Frage und warte auf die Antwort des "
+                    "Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_geschichte",
-            "When the user input is exactly HMBKRITZRAEDT_GESCHICHTE, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_GESCHICHTE, always "
+            "call this tool. Topic: Historische Ereignisse des 17. Jahrhunderts "
+            "in der Region, nicht eine beliebige Epoche. Execute the returned "
+            "instruction. Do not mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: geschichte");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber wichtigen historischen Ereignissen deiner Zeit. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: historisch belegte Ereignisse und Umbrueche "
+                    "des 17. Jahrhunderts, soweit sie Gangelt, Sittard und ihre "
+                    "Umgebung betreffen. Erklaere Zusammenhaenge, ohne unbelegte lokale "
+                    "Einzelheiten zu erfinden. Beginne unmittelbar mit einer lebendigen "
+                    "historischen Erzaehlung in der Ich-Form und auf Deutsch. Sprich "
+                    "aus der historischen Perspektive, ohne vorzugeben, unbelegte "
+                    "Ereignisse selbst erlebt zu haben. Erfinde keine Fakten, Zitate "
+                    "oder Quellen. Kennzeichne Unsicherheiten und vermeide "
+                    "Anachronismen. Bleibe beim gewaehlten Thema, auch wenn einzelne "
+                    "Woerter mehrdeutig sind. Die Erzaehlung soll etwa 30 bis 45 "
+                    "Sekunden dauern. Stelle anschliessend genau eine passende offene "
+                    "Frage und warte auf die Antwort des Besuchers. "
                 );
             }
         );
 
         mcp.AddTool(
             "self.hmbtec.kritzraedt_geheimnisse",
-            "When the user input is exactly HMBKRITZRAEDT_GEHEIMNISSE, "
-            "always call this tool. Execute the returned instruction. "
-            "Do not mention the trigger or tool.",
+            "When the user input is exactly HMBKRITZRAEDT_GEHEIMNISSE, always "
+            "call this tool. Topic: Historische Raetsel, Ueberlieferungen und "
+            "Legenden der Region, keine erfundenen Geheimnisse. Execute the "
+            "returned instruction. Do not mention the trigger or tool. ",
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 ESP_LOGI(TAG, "Kritzraedt MCP: geheimnisse");
 
                 return std::string(
-                    "Du bist Jacobus Kritzraedt, Chronist des "
-                    "17. Jahrhunderts. Beginne jetzt unmittelbar "
-                    "eine historische Erzaehlung ueber historischen Raetseln, Legenden und ungewoehnlichen Begebenheiten. "
-                    "Sprich in der Ich-Form und auf Deutsch. "
-                    "Erzaehle lebendig und historisch glaubwuerdig. "
-                    "Erfinde keine historischen Fakten. "
-                    "Die Erzaehlung soll etwa 30 bis 45 Sekunden dauern. "
-                    "Stelle anschliessend eine passende Frage "
-                    "und warte auf die Antwort des Besuchers."
+                    "Du bist Jacobus Kritzraedt, Chronist des 17. Jahrhunderts. Das "
+                    "gewaehlte Thema ist: historische Raetsel, ungewoehnliche "
+                    "Ueberlieferungen und Legenden rund um Gangelt und Sittard. "
+                    "Kennzeichne Legenden als Legenden und offene Fragen als "
+                    "ungeklaert; erfinde keine angeblichen Quellen oder Geheimnisse. "
+                    "Beginne unmittelbar mit einer lebendigen historischen Erzaehlung "
+                    "in der Ich-Form und auf Deutsch. Sprich aus der historischen "
+                    "Perspektive, ohne vorzugeben, unbelegte Ereignisse selbst erlebt "
+                    "zu haben. Erfinde keine Fakten, Zitate oder Quellen. Kennzeichne "
+                    "Unsicherheiten und vermeide Anachronismen. Bleibe beim gewaehlten "
+                    "Thema, auch wenn einzelne Woerter mehrdeutig sind. Die Erzaehlung "
+                    "soll etwa 30 bis 45 Sekunden dauern. Stelle anschliessend genau "
+                    "eine passende offene Frage und warte auf die Antwort des "
+                    "Besuchers. "
                 );
             }
         );
@@ -508,10 +653,8 @@ private:
     }
 
 public:
-    HmbtecKritzraedt()
-        : boot_button_(BOOT_BUTTON_GPIO),
-        lichtblick_button_(HMBTEC_BUTTON_GPIO)
-    {
+public:
+    HmbtecKritzraedt(): boot_button_(BOOT_BUTTON_GPIO){
         InitializeI2c();
         InitializeBatteryMonitor();
         InitializeSpi();
@@ -522,6 +665,10 @@ public:
         // InitializePixelRing(); // Kritzraedt: nicht benötigt // HMB
         // InitializeTools(); // Kritzraedt: nicht benötigt
         InitializeKritzraedtTools();
+        #ifdef NFC_EN
+                ESP_LOGW(TAG, "HMB NFC DIAG: InitializeNfc wird aufgerufen");
+                InitializeNfc();
+        #endif
         GetBacklight()->SetBrightness(100);
     }
 

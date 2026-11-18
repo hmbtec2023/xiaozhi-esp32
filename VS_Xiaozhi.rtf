@@ -99,21 +99,25 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"\
 \cf6 FLASH (C3 4MB)\cf2 :\
 python3 -m esptool --chip esp32c3 -p /dev/cu.usbmodem101 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 4MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0xd000 build/ota_data_initial.bin 0x10000 build/xiaozhi.bin 0x300000 build/generated_assets.bin\
 \
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 \cf6 BUILD + FLASH (S3 16MB)\cf2 :\
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 
 \fs26 MIT MONI
 \fs36 \
 python3 scripts/build.py hmbtec-kritzraedt-s3 --name hmbtec-kritzraedt-s3 --language de-DE && python3 $IDF_PATH/tools/idf.py -p /dev/cu.usbmodem101 flash monitor\
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 \
+ODER\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+\cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 idf.py -p /dev/cu.usbmodem101 flash monitor\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+\cf2 \kerning1\expnd0\expndtw0 \CocoaLigature0 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 
 \fs26 OHNE MONI
 \fs36 \
 python3 scripts/build.py hmbtec-kritzraedt-s3 --name hmbtec-kritzraedt-s3 --language de-DE && python3 $IDF_PATH/tools/idf.py -p /dev/cu.usbmodem101 flash\
 \
-\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 
 \fs26 NUR FLASH
 \fs36 \
@@ -121,6 +125,23 @@ python3 scripts/build.py hmbtec-kritzraedt-s3 --name hmbtec-kritzraedt-s3 --lang
 \expnd0\expndtw0\kerning0
 python3 $IDF_PATH/tools/idf.py -p /dev/cu.usbmodem101 flash\cf0 \CocoaLigature1 \
 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+
+\fs26 \cf2 \kerning1\expnd0\expndtw0 \CocoaLigature0 NUR BUILD 
+\fs36 \cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+\cf0 idf.py reconfigure build\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+
+\fs32 \cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 oder bei kleinen \'c4nderungen reicht auch
+\fs36 \cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
+\cf0 idf.py build\
+\
+\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardeftab720\pardirnatural\partightenfactor0
 \cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 Monitor\cf2 :\
 \pard\pardeftab720\sa240\partightenfactor0
 \cf0 \expnd0\expndtw0\kerning0
@@ -138,4 +159,5 @@ sudo lsof -t /dev/cu.usbmodem* | xargs -r sudo kill -9\
 \
 
 \fs78 \
+source /Users/hmb/.espressif/v6.1/esp-idf/export.sh && idf.py menuconfig\
 }

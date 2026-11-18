@@ -54,4 +54,24 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 #define DISPLAY_SPI_MODE      0
 
+// HMB|TEC NFC: vierpoliger Erweiterungsconnector, Software-SPI.
+// GPIO2/3/14 sind exklusiv fuer RC522 reserviert; Buzzer/Taster/Pixel deaktiviert.
+#define HMB_NFC_NONE   0
+#define HMB_NFC_RC522  1
+#define HMB_NFC_PN5180 2
+#define HMB_NFC_READER HMB_NFC_RC522
+
+#if HMB_NFC_READER == HMB_NFC_RC522
+#define NFC_EN 1
+#define NFC_SOFT_SPI 1
+#define NFC_SCK_GPIO  GPIO_NUM_38 //14
+#define NFC_MOSI_GPIO GPIO_NUM_48 //21
+#define NFC_MISO_GPIO GPIO_NUM_47 //2
+#define NFC_SS_GPIO   GPIO_NUM_41 //39 //3
+#define NFC_RST_GPIO  GPIO_NUM_40
+// RC522 NRSTPD dauerhaft HIGH an 3V3 (nur bei geeignetem 3,3-V-Modul).
+#elif HMB_NFC_READER == HMB_NFC_PN5180
+#error "PN5180-Treiber noch nicht integriert"
+#endif
+
 #endif  // _BOARD_CONFIG_H_
