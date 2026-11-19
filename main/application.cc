@@ -1,3 +1,4 @@
+#include "esp_heap_caps.h"
 #include "hmb_api_lab.h"
 #include "application.h"
 #include "sdkconfig.h"
@@ -95,6 +96,9 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+    ESP_LOGI("HMB_RAM", "Free=%u, Largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
     ESP_LOGI(TAG, "After board/audio init");
     SystemInfo::PrintHeapStats();
@@ -458,6 +462,9 @@ void Application::QueueWakeWordInvoke(const std::string& wake_word) {
 }
 
 void Application::HandleActivationDoneEvent() {
+    ESP_LOGI("HMB_RAM", "AFTER_ACTIVATION Free=%u, Largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     ESP_LOGI(TAG, "Activation done");
 
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3

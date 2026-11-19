@@ -1385,6 +1385,106 @@ private:
         ESP_LOGI(TAG, "GPIO1: Volume+ / GPIO2: Volume- (5%%, NVS)");
     }
 
+
+    // HMB|TEC VoiceRecorder V0.9.28
+    // GPIO0, aktiv LOW, 50 ms Entprellung.
+    // Kurz < 1000 ms: Wiedergabe
+    // Lang >= 1000 ms: Aufnahme bis Loslassen, maximal 5 s.
+    // Vorerst nur Ereignisdiagnose, noch keine Audioaktion.
+    static void VoiceRecorderButtonTaskEntry(void* ctx) {
+        static_cast<HmbtecEinschlafCoachC3Board*>(ctx)->VoiceRecorderButtonTask();
+    }
+
+    void VoiceRecorderButtonTask() {
+        constexpr int64_t kDebounceMs = 50;
+        constexpr int64_t kLongPressMs = 1000;
+        constexpr int64_t kMaxRecordMs = 5000;
+
+        int last_raw = 1;
+        int stable = 1;
+        int64_t changed_at = 0;
+        int64_t pressed_at = 0;
+        bool recording = false;
+
+        for (;;) {
+            const int64_t now = esp_timer_get_time() / 1000;
+            const int raw = gpio_get_level(GPIO_NUM_0);
+
+            if (raw != last_raw) {
+                last_raw = raw;
+                changed_at = now;
+            }
+
+            if (raw != stable && now - changed_at >= kDebounceMs) {
+                stable = raw;
+
+                if (stable == 0) {
+                    pressed_at = now;
+                    recording = false;
+                } else {
+                    if (recording) {
+                        Application::GetInstance()
+                            .GetAudioService()
+                            .StopVoiceRecording();
+                        ESP_LOGI(TAG, "REC GPIO0: STOP");
+                    } else if (pressed_at != 0) {
+                        const bool started = Application::GetInstance()
+                            .GetAudioService()
+                            .PlayVoiceRecording();
+                        ESP_LOGI(TAG, "REC GPIO0: PLAY %s",
+                                 started ? "OK" : "FAILED");
+                    }
+                    recording = false;
+                    pressed_at = 0;
+                }
+            }
+
+            if (stable == 0 && pressed_at != 0) {
+                const int64_t held = now - pressed_at;
+
+                if (!recording && held >= kLongPressMs &&
+                    held < kLongPressMs + kMaxRecordMs) {
+                    recording = true;
+                    recording = Application::GetInstance()
+                        .GetAudioService()
+                        .StartVoiceRecording();
+                    ESP_LOGI(TAG, "REC GPIO0: START %s",
+                             recording ? "OK" : "FAILED");
+                }
+
+                if (recording && held >= kLongPressMs + kMaxRecordMs) {
+                    recording = false;
+                    Application::GetInstance()
+                        .GetAudioService()
+                        .StopVoiceRecording();
+                    ESP_LOGI(TAG, "REC GPIO0: MAX 5s");
+                    // Kein erneuter Start während desselben Tastendrucks.
+                    pressed_at = 0;
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
+    void InitializeVoiceRecorderButton() {
+        gpio_config_t config = {};
+        config.pin_bit_mask = 1ULL << GPIO_NUM_0;
+        config.mode = GPIO_MODE_INPUT;
+        config.pull_up_en = GPIO_PULLUP_ENABLE;
+        config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        config.intr_type = GPIO_INTR_DISABLE;
+
+        ESP_ERROR_CHECK(gpio_config(&config));
+
+        if (xTaskCreate(VoiceRecorderButtonTaskEntry,
+                        "hmb_rec_button", 2048, this, 3, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "VoiceRecorder ButtonTask Start fehlgeschlagen");
+        }
+
+        ESP_LOGI(TAG, "GPIO0: VoiceRecorder-Taste bereit");
+    }
+
     void InitializeButtons() {
         gpio_set_direction(GPIO_NUM_3, GPIO_MODE_INPUT);
         gpio_set_pull_mode(GPIO_NUM_3, GPIO_PULLUP_ONLY);
@@ -1694,6 +1794,7 @@ public:
         ); 
         InitializeButtons();
         InitializeVolumeButtons();
+        InitializeVoiceRecorderButton();
         InitializeIrTransmitter();
         RegisterLightMcpTools();
         if (xTaskCreate(HmbFireplaceTask, "hmb_fireplace", 4096, nullptr, 2, nullptr) != pdPASS) {

@@ -254,10 +254,18 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     return true;
 }
 
+// HMB|TEC VoiceRecorder: ADPCM-Vorwaertsdeklaration
+namespace {
+uint8_t EncodeAdpcmSample(int16_t sample,
+                          int16_t& predictor,
+                          int& index);
+}
+
 void AudioService::AudioInputTask() {
     constexpr EventBits_t kAudioInputActiveBits = AS_EVENT_AUDIO_TESTING_RUNNING |
                                                   AS_EVENT_WAKE_WORD_RUNNING |
-                                                  AS_EVENT_AUDIO_PROCESSOR_RUNNING;
+                                                  AS_EVENT_AUDIO_PROCESSOR_RUNNING |
+                                                  AS_EVENT_VOICE_RECORDER_RUNNING;
 
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(
@@ -294,6 +302,44 @@ void AudioService::AudioInputTask() {
         }
 
         /* Used for audio testing in NetworkConfiguring mode by clicking the BOOT button */
+        // HMB|TEC VoiceRecorder: exklusiver Mikrofonpfad
+        if (bits & AS_EVENT_VOICE_RECORDER_RUNNING) {
+            std::vector<int16_t> pcm;
+
+            if (ReadAudioData(pcm, 16000, 160)) {
+                std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+
+                if (voice_recorder_active_.load()) {
+                    // 16 kHz -> 8 kHz: je zwei Samples mitteln.
+                    for (size_t i = 0; i + 1 < pcm.size(); i += 2) {
+                        if (voice_recorder_samples_ >= 40000) {
+                            break;
+                        }
+
+                        const int32_t averaged =
+                            (static_cast<int32_t>(pcm[i]) +
+                             static_cast<int32_t>(pcm[i + 1])) / 2;
+
+                        const uint8_t nibble = EncodeAdpcmSample(
+                            static_cast<int16_t>(averaged),
+                            voice_recorder_predictor_,
+                            voice_recorder_step_index_);
+
+                        if ((voice_recorder_samples_ & 1U) == 0) {
+                            voice_recorder_data_.push_back(nibble);
+                        } else {
+                            voice_recorder_data_.back() |=
+                                static_cast<uint8_t>(nibble << 4);
+                        }
+
+                        ++voice_recorder_samples_;
+                    }
+                }
+            }
+
+            continue;
+        }
+
         if (bits & AS_EVENT_AUDIO_TESTING_RUNNING) {
             bool testing_queue_full = false;
             {
@@ -413,12 +459,275 @@ void AudioService::AudioOutputTask() {
     ESP_LOGW(TAG, "Audio output task stopped");
 }
 
+
+// HMB|TEC VoiceRecorder V0.9.28
+// IMA-ADPCM: 16-Bit-PCM -> 4-Bit-ADPCM
+namespace {
+
+constexpr int kAdpcmStepTable[89] = {
+    7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,
+    34,37,41,45,50,55,60,66,73,80,88,97,107,118,130,
+    143,157,173,190,209,230,253,279,307,337,371,408,
+    449,494,544,598,658,724,796,876,963,1060,1166,
+    1282,1411,1552,1707,1878,2066,2272,2499,2749,
+    3024,3327,3660,4026,4428,4871,5358,5894,6484,
+    7132,7845,8630,9493,10442,11487,12635,13899,
+    15289,16818,18500,20350,22385,24623,27086,29794,
+    32767
+};
+
+constexpr int kAdpcmIndexTable[16] = {
+    -1,-1,-1,-1,2,4,6,8,
+    -1,-1,-1,-1,2,4,6,8
+};
+
+uint8_t EncodeAdpcmSample(int16_t sample, int16_t& predictor,
+                          int& index) {
+    const int step = kAdpcmStepTable[index];
+    int difference = static_cast<int>(sample) - predictor;
+    uint8_t code = 0;
+
+    if (difference < 0) {
+        code = 8;
+        difference = -difference;
+    }
+
+    int delta = step >> 3;
+
+    if (difference >= step) {
+        code |= 4;
+        difference -= step;
+        delta += step;
+    }
+    if (difference >= (step >> 1)) {
+        code |= 2;
+        difference -= step >> 1;
+        delta += step >> 1;
+    }
+    if (difference >= (step >> 2)) {
+        code |= 1;
+        delta += step >> 2;
+    }
+
+    int predicted = predictor + ((code & 8) ? -delta : delta);
+    predictor = static_cast<int16_t>(
+        std::clamp(predicted, -32768, 32767));
+
+    index = std::clamp(index + kAdpcmIndexTable[code], 0, 88);
+
+    return code;
+}
+
+int16_t DecodeAdpcmSample(uint8_t code,
+                          int16_t& predictor,
+                          int& index) {
+    code &= 0x0F;
+
+    const int step = kAdpcmStepTable[index];
+
+    int delta = step >> 3;
+    if (code & 1) delta += step >> 2;
+    if (code & 2) delta += step >> 1;
+    if (code & 4) delta += step;
+
+    const int predicted =
+        static_cast<int>(predictor) +
+        ((code & 8) ? -delta : delta);
+
+    predictor = static_cast<int16_t>(
+        std::clamp(predicted, -32768, 32767));
+
+    index = std::clamp(
+        index + kAdpcmIndexTable[code], 0, 88);
+
+    return predictor;
+}
+
+} // namespace
+
+
+// HMB|TEC VoiceRecorder V0.9.28
+bool AudioService::StartVoiceRecording() {
+    if (service_stopped_.load() || event_group_ == nullptr) {
+        ESP_LOGW(TAG, "VoiceRecorder: AudioService nicht bereit");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+
+    if (voice_recorder_active_.load() ||
+        voice_recorder_playing_.load()) {
+        ESP_LOGW(TAG, "VoiceRecorder: Aufnahme/Wiedergabe bereits aktiv");
+        return false;
+    }
+
+    // Speicher vor Beginn reservieren, damit im Audiopfad
+    // keine wiederholten Heap-Allokationen erforderlich sind.
+    voice_recorder_data_.clear();
+    voice_recorder_data_.reserve(kVoiceRecorderMaxBytes);
+
+    voice_recorder_predictor_ = 0;
+    voice_recorder_step_index_ = 0;
+    voice_recorder_samples_ = 0;
+    voice_recorder_started_us_ = esp_timer_get_time();
+
+    voice_recorder_active_.store(true);
+
+    xEventGroupSetBits(event_group_, AS_EVENT_VOICE_RECORDER_RUNNING);
+
+    ESP_LOGI(TAG, "VoiceRecorder: Aufnahme gestartet");
+    return true;
+}
+
+void AudioService::StopVoiceRecording() {
+    voice_recorder_active_.store(false);
+
+    if (event_group_ != nullptr) {
+        xEventGroupClearBits(event_group_,
+                            AS_EVENT_VOICE_RECORDER_RUNNING);
+    }
+
+    std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+
+    ESP_LOGI(TAG,
+             "VoiceRecorder: Aufnahme beendet, %lu Samples, %u Bytes",
+             static_cast<unsigned long>(voice_recorder_samples_),
+             static_cast<unsigned>(voice_recorder_data_.size()));
+}
+
+
+// HMB|TEC VoiceRecorder V0.9.28
+bool AudioService::PlayVoiceRecording() {
+    if (service_stopped_.load() || voice_recorder_active_.load()) {
+        return false;
+    }
+
+    // Atomare Pruefung und Reservierung des Audiokanals.
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+
+        if (!IsPlaybackDrainedLocked() ||
+            voice_recorder_playing_.load()) {
+            ESP_LOGW(TAG, "VoiceRecorder: Audiokanal beschaeftigt");
+            return false;
+        }
+
+        voice_recorder_playing_.store(true);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+        if (voice_recorder_samples_ == 0 || voice_recorder_data_.empty()) {
+            voice_recorder_playing_.store(false);
+            audio_queue_cv_.notify_all();
+            ESP_LOGW(TAG, "VoiceRecorder: Keine Aufnahme vorhanden");
+            return false;
+        }
+    }
+
+    if (xTaskCreate(VoiceRecorderPlaybackTaskEntry,
+                    "hmb_rec_play", 4096, this, 3, nullptr) != pdPASS) {
+        voice_recorder_playing_.store(false);
+            audio_queue_cv_.notify_all();
+        ESP_LOGE(TAG, "VoiceRecorder: PlaybackTask konnte nicht starten");
+        return false;
+    }
+
+    return true;
+}
+
+void AudioService::VoiceRecorderPlaybackTaskEntry(void* ctx) {
+    static_cast<AudioService*>(ctx)->VoiceRecorderPlaybackTask();
+    vTaskDelete(nullptr);
+}
+
+void AudioService::VoiceRecorderPlaybackTask() {
+    int16_t predictor = 0;
+    int index = 0;
+
+    const int output_rate = codec_->output_sample_rate();
+    const int ratio = output_rate / 8000;
+
+    if (ratio < 1 || output_rate % 8000 != 0) {
+        ESP_LOGE(TAG, "VoiceRecorder: Nicht unterstuetzte Rate %d",
+                 output_rate);
+        voice_recorder_playing_.store(false);
+        return;
+    }
+
+    size_t sample_count = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+        sample_count = voice_recorder_samples_;
+    }
+
+    constexpr size_t kBlockSamples = 160;
+
+    for (size_t offset = 0;
+         offset < sample_count && !service_stopped_.load();
+         offset += kBlockSamples) {
+
+        const size_t count =
+            std::min(kBlockSamples, sample_count - offset);
+
+        AudioTask task;
+        task.type = kAudioTaskTypeDecodeToPlaybackQueue;
+        task.pcm.reserve(count * ratio);
+
+        {
+            std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+
+            for (size_t i = 0; i < count; ++i) {
+                const size_t sample_index = offset + i;
+                const uint8_t packed =
+                    voice_recorder_data_[sample_index / 2];
+
+                const uint8_t nibble =
+                    (sample_index & 1)
+                        ? (packed >> 4)
+                        : (packed & 0x0F);
+
+                const int16_t pcm =
+                    DecodeAdpcmSample(nibble, predictor, index);
+
+                for (int r = 0; r < ratio; ++r) {
+                    task.pcm.push_back(pcm);
+                }
+            }
+        }
+
+        std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+
+        audio_queue_cv_.wait(lock, [this]() {
+            return service_stopped_.load() ||
+                   audio_playback_queue_.size() <
+                       MAX_PLAYBACK_TASKS_IN_QUEUE;
+        });
+
+        if (service_stopped_.load()) {
+            break;
+        }
+
+        audio_playback_queue_.push_back(std::move(task));
+        playback_drained_notified_ = false;
+
+        lock.unlock();
+        audio_queue_cv_.notify_all();
+    }
+
+    voice_recorder_playing_.store(false);
+    audio_queue_cv_.notify_all();
+    ESP_LOGI(TAG, "VoiceRecorder: Wiedergabe beendet");
+}
+
 void AudioService::OpusCodecTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
             return service_stopped_.load() || !audio_encode_queue_.empty() ||
-                   (!audio_decode_queue_.empty() &&
+                   (!voice_recorder_playing_.load() &&
+                    !audio_decode_queue_.empty() &&
                     audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE);
         });
         if (service_stopped_.load()) {
@@ -426,7 +735,8 @@ void AudioService::OpusCodecTask() {
         }
 
         /* Decode the audio from decode queue */
-        if (!audio_decode_queue_.empty() &&
+        if (!voice_recorder_playing_.load() &&
+            !audio_decode_queue_.empty() &&
             audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();

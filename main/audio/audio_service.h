@@ -51,6 +51,7 @@
 #define AS_EVENT_AUDIO_TESTING_RUNNING (1 << 0)
 #define AS_EVENT_WAKE_WORD_RUNNING (1 << 1)
 #define AS_EVENT_AUDIO_PROCESSOR_RUNNING (1 << 2)
+#define AS_EVENT_VOICE_RECORDER_RUNNING (1 << 3)
 #define AS_EVENT_AUDIO_INPUT_STOP_REQUEST (1 << 4)
 
 #define AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms)                  \
@@ -138,6 +139,11 @@ public:
     void ReleaseWakeWordResources();
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);
+    // HMB|TEC VoiceRecorder V0.9.28
+    bool StartVoiceRecording();
+    void StopVoiceRecording();
+    bool PlayVoiceRecording();
+
     void EnableDeviceAec(bool enable);
     void RequestInputStop();
 
@@ -209,12 +215,31 @@ private:
     std::atomic<bool> service_stopped_{true};
     std::atomic<bool> audio_input_need_warmup_{false};
 
+    // VoiceRecorder: maximal 5 Sekunden, 8 kHz, IMA-ADPCM.
+    static constexpr size_t kVoiceRecorderMaxBytes = 20000;
+    std::mutex voice_recorder_mutex_;
+    std::vector<uint8_t> voice_recorder_data_;
+    std::atomic<bool> voice_recorder_active_{false};
+    std::atomic<bool> voice_recorder_playing_{false};
+
+    // IMA-ADPCM Encoder-Zustand
+    int16_t voice_recorder_predictor_ = 0;
+    int voice_recorder_step_index_ = 0;
+    uint32_t voice_recorder_samples_ = 0;
+    int64_t voice_recorder_started_us_ = 0;
+
+
+
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;
     std::chrono::steady_clock::time_point last_output_time_;
 
     void AudioInputTask();
     void AudioOutputTask();
+    // HMB|TEC VoiceRecorder: ADPCM-Wiedergabe
+    static void VoiceRecorderPlaybackTaskEntry(void* ctx);
+    void VoiceRecorderPlaybackTask();
+
     void OpusCodecTask();
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     bool InitializeAudioEngine();
