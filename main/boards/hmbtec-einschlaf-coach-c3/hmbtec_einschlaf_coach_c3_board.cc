@@ -10,7 +10,7 @@ static std::atomic<bool> hmb_fireplace_end_conversation{false};
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
- * PROJECT_VERSION: 0.9.26
+ * PROJECT_VERSION: 0.9.27
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
@@ -79,6 +79,11 @@ static std::atomic<bool> hmb_fireplace_end_conversation{false};
 #define HMB_DEEP_SLEEP_SOUND_EMBEDDED 1 // Auf 1 setzen, sobald DEEP_SLEEP.ogg in EMBED_FILES steht
 #define HMB_SLEEP_IDLE_MS (5LL * 60 * 1000)
 #define HMB_FIREPLACE_MAX_MS (20LL * 60 * 1000)
+#define HMB_VOLUME_UP_GPIO GPIO_NUM_1
+#define HMB_VOLUME_DOWN_GPIO GPIO_NUM_2
+#define HMB_VOLUME_STEP 5
+#define HMB_VOLUME_MIN 10
+#define HMB_VOLUME_MAX 100
 #define HMB_SLEEP_SOUND_WAIT_MS 2500 // An tatsaechliche OGG-Dauer anpassen
 
 // ============================================================
@@ -1321,6 +1326,65 @@ private:
         }
     }
 
+    // GPIO1/2: separate Lautstaerketaster, aktiv LOW.
+    // AudioCodec::SetOutputVolume speichert den Wert bereits unter
+    // NVS-Namespace "audio", Schluessel "output_volume".
+    static void VolumeButtonTaskEntry(void* ctx) {
+        static_cast<HmbtecEinschlafCoachC3Board*>(ctx)->VolumeButtonTask();
+    }
+
+    void VolumeButtonTask() {
+        constexpr int kDebounceMs = 50;
+        constexpr int kPollMs = 10;
+        const gpio_num_t pins[2] = {HMB_VOLUME_UP_GPIO, HMB_VOLUME_DOWN_GPIO};
+        int stable[2] = {1, 1};
+        int last_raw[2] = {1, 1};
+        int64_t changed_at[2] = {0, 0};
+        for (;;) {
+            const int64_t now = esp_timer_get_time() / 1000;
+            for (int i = 0; i < 2; ++i) {
+                const int raw = gpio_get_level(pins[i]);
+                if (raw != last_raw[i]) {
+                    last_raw[i] = raw;
+                    changed_at[i] = now;
+                }
+                if (raw != stable[i] && now - changed_at[i] >= kDebounceMs) {
+                    stable[i] = raw;
+                    if (stable[i] == 0) {
+                        auto* codec = GetAudioCodec();
+                        const int old_volume = codec->output_volume();
+                        const int delta = i == 0 ? HMB_VOLUME_STEP : -HMB_VOLUME_STEP;
+                        const int new_volume = std::clamp(old_volume + delta,
+                                                         HMB_VOLUME_MIN, HMB_VOLUME_MAX);
+                        if (new_volume != old_volume) {
+                            codec->SetOutputVolume(new_volume);
+                            ESP_LOGI(TAG, "VOLUME GPIO%d: %d -> %d%%",
+                                     static_cast<int>(pins[i]), old_volume, new_volume);
+                        }
+                    }
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(kPollMs));
+        }
+    }
+
+    void InitializeVolumeButtons() {
+        const gpio_num_t pins[2] = {HMB_VOLUME_UP_GPIO, HMB_VOLUME_DOWN_GPIO};
+        for (auto pin : pins) {
+            gpio_config_t config = {};
+            config.pin_bit_mask = 1ULL << static_cast<unsigned>(pin);
+            config.mode = GPIO_MODE_INPUT;
+            config.pull_up_en = GPIO_PULLUP_ENABLE;
+            config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            config.intr_type = GPIO_INTR_DISABLE;
+            ESP_ERROR_CHECK(gpio_config(&config));
+        }
+        if (xTaskCreate(VolumeButtonTaskEntry, "hmb_volume", 3072, this, 3, nullptr) != pdPASS) {
+            ESP_LOGE(TAG, "VolumeButtonTask konnte nicht gestartet werden");
+        }
+        ESP_LOGI(TAG, "GPIO1: Volume+ / GPIO2: Volume- (5%%, NVS)");
+    }
+
     void InitializeButtons() {
         gpio_set_direction(GPIO_NUM_3, GPIO_MODE_INPUT);
         gpio_set_pull_mode(GPIO_NUM_3, GPIO_PULLUP_ONLY);
@@ -1597,7 +1661,7 @@ public:
         // Die periodischen SystemInfo-Speichermeldungen aus dem Serial-Log ausblenden.
         // Betrifft nur diesen Log-Tag, nicht andere Fehler-/Warnmeldungen.
         esp_log_level_set("SystemInfo", ESP_LOG_NONE);
-        ESP_LOGI(TAG, "HMBTEC Sleep Companion C3 V0.9.20");
+        ESP_LOGI(TAG, "HMBTEC Einschlaf-Coach C3 V0.9.27");
         #if HMB_ANSAGE_TEST_MODE
                 ESP_LOGW(TAG, "ANSAGE TEST aktiv: P1 -> P2 -> P3, ohne Board-State-Machine");
         #endif
@@ -1629,6 +1693,7 @@ public:
             }
         ); 
         InitializeButtons();
+        InitializeVolumeButtons();
         InitializeIrTransmitter();
         RegisterLightMcpTools();
         if (xTaskCreate(HmbFireplaceTask, "hmb_fireplace", 4096, nullptr, 2, nullptr) != pdPASS) {
