@@ -461,6 +461,26 @@ void Application::HandleActivationDoneEvent() {
     ESP_LOGI(TAG, "Activation done");
 
 #if CONFIG_BOARD_TYPE_HMBTEC_KRITZRAEDT_S3
+    HmbMuseumGuideBeacon::SetRoomChangedCallback([](int room) {
+        auto& app = Application::GetInstance();
+
+        if (app.GetDeviceState() != kDeviceStateIdle) {
+            ESP_LOGI(TAG, "MuseumGuide: Raumwechsel %d, XiaoZhi beschaeftigt", room + 1);
+            return;
+        }
+
+        const char* triggers[] = {
+            "HMBRAUM1",
+            "HMBRAUM2",
+            "HMBRAUM3"
+        };
+
+        if (room >= 0 && room < 3) {
+            ESP_LOGI(TAG, "MuseumGuide: Trigger %s", triggers[room]);
+            app.WakeWordInvoke(triggers[room], true);
+        }
+    });
+
     HmbMuseumGuideBeacon::Start();
 #endif
 

@@ -3,7 +3,7 @@
  * HMB | TEC Build Information
  * ================================================================
  * PROJECT_NAME:    HMB_MuseumGuide_Beacon
- * PROJECT_VERSION: 0.1.3
+ * PROJECT_VERSION: 0.1.7
  * BOARD:           HMBTEC Kritzraedt ESP32-S3
  * FRAMEWORK:       ESP-IDF 6.1 / NimBLE
  *
@@ -33,6 +33,11 @@ namespace HmbMuseumGuideBeacon {
 
 static const char* TAG = "HMB_BEACON";
 static bool started = false;
+static RoomChangedCallback room_changed_callback = nullptr;
+
+void SetRoomChangedCallback(RoomChangedCallback callback) {
+    room_changed_callback = callback;
+}
 
 
 static constexpr int RSSI_WINDOW = 10;
@@ -53,6 +58,136 @@ struct BeaconEntry {
 
 static BeaconEntry beacons[MAX_BEACONS];
 
+// ================================================================
+// HMB | TEC MuseumGuide – Raumzuordnung
+// ================================================================
+
+static constexpr uint32_t ROOM_CONFIRM_MS = 5000;
+static constexpr uint32_t BEACON_TIMEOUT_MS = 5000;
+static constexpr float ROOM_HYSTERESIS_DB = 8.0f;
+
+struct RoomConfig {
+    const char* name;
+    uint8_t mac[6];  // NimBLE: umgekehrte Byte-Reihenfolge
+};
+
+static const RoomConfig rooms[] = {
+    {"RAUM_1", {0xC7, 0x40, 0xA8, 0x86, 0xC0, 0xC4}},
+    {"RAUM_2", {0x25, 0x30, 0x84, 0x6D, 0x86, 0xEB}},
+    {"RAUM_3", {0x2C, 0x48, 0x0E, 0x26, 0x67, 0xDD}}
+};
+
+static constexpr int ROOM_COUNT = sizeof(rooms) / sizeof(rooms[0]);
+
+static int active_room = -1;
+static int candidate_room = -1;
+static uint32_t candidate_since = 0;
+static uint32_t candidate_last_valid = 0;
+static constexpr uint32_t ROOM_GRACE_MS = 1500;
+
+static int GetRoomIndex(const uint8_t* mac) {
+    for (int i = 0; i < ROOM_COUNT; i++) {
+        if (memcmp(mac, rooms[i].mac, 6) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static float GetAverage(const BeaconEntry& b) {
+    if (b.count == 0) return -127.0f;
+
+    int sum = 0;
+    for (int i = 0; i < b.count; i++) {
+        sum += b.samples[i];
+    }
+    return float(sum) / b.count;
+}
+
+static void UpdateRoomDetection(uint32_t now) {
+
+    float levels[ROOM_COUNT];
+
+    for (int i = 0; i < ROOM_COUNT; i++) {
+        levels[i] = -127.0f;
+    }
+
+    for (const auto& b : beacons) {
+        if (!b.used || b.count == 0 ||
+            now - b.last_seen > BEACON_TIMEOUT_MS) {
+            continue;
+        }
+
+        const int room = GetRoomIndex(b.mac);
+
+        if (room >= 0) {
+            const float avg = GetAverage(b);
+            if (avg > levels[room]) {
+                levels[room] = avg;
+            }
+        }
+    }
+
+    int strongest = -1;
+    float strongest_level = -127.0f;
+
+    for (int i = 0; i < ROOM_COUNT; i++) {
+        if (levels[i] > strongest_level) {
+            strongest_level = levels[i];
+            strongest = i;
+        }
+    }
+
+    const bool valid =
+        strongest >= 0 &&
+        strongest != active_room &&
+        (active_room < 0 ||
+         levels[active_room] <= -127.0f ||
+         strongest_level >= levels[active_room] + ROOM_HYSTERESIS_DB);
+
+    if (!valid) {
+        if (candidate_room >= 0) {
+            if (now - candidate_last_valid > ROOM_GRACE_MS) {
+                candidate_room = -1;
+            }
+        }
+        return;
+    }
+
+    if (candidate_room != strongest) {
+        candidate_room = strongest;
+        candidate_since = now;
+        candidate_last_valid = now;
+
+        ESP_LOGI(TAG, "ROOM_CANDIDATE=%s RSSI_AVG=%.1f",
+                 rooms[strongest].name, strongest_level);
+        return;
+    }
+
+    const uint32_t gap = now - candidate_last_valid;
+
+    if (gap > ROOM_GRACE_MS) {
+        candidate_since = now;
+        candidate_last_valid = now;
+        return;
+    }
+
+    // Regulaere Messintervalle zaehlen zur Bestaetigungszeit.
+    // Nur Unterbrechungen ueber ROOM_GRACE_MS starten neu.
+    candidate_last_valid = now;
+
+    if (now - candidate_since >= ROOM_CONFIRM_MS) {
+        active_room = strongest;
+        candidate_room = -1;
+
+        ESP_LOGW(TAG, "ROOM_CHANGED=%s RSSI_AVG=%.1f",
+                 rooms[active_room].name, strongest_level);
+
+        if (room_changed_callback) {
+            room_changed_callback(active_room);
+        }
+    }
+}
 
 static int GapEvent(struct ble_gap_event* event, void*) {
     if (event->type != BLE_GAP_EVENT_DISC) return 0;
@@ -112,6 +247,8 @@ static int GapEvent(struct ble_gap_event* event, void*) {
             }
 
             entry->last_seen = now;
+
+            UpdateRoomDetection(now);
 
             if (now - entry->last_log >= LOG_INTERVAL_MS) {
                 int sum = 0;
@@ -199,7 +336,7 @@ void Start() {
         return;
     }
 
-    ESP_LOGI(TAG, "HMB MuseumGuide Beacon V0.1.3");
+    ESP_LOGI(TAG, "HMB MuseumGuide Beacon V0.1.4");
     ESP_LOGI(TAG, "Build: %s %s", __DATE__, __TIME__);
     ESP_LOGI(TAG, "Source: %s", __FILE__);
 

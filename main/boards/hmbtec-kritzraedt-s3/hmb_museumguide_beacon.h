@@ -2,13 +2,18 @@
 
 /*
  * HMB | TEC MuseumGuide Beacon
- * Version: 0.1.0
+ * Version: 0.1.7
  *
  * Passiver BLE-Observer fuer die Raumerkennung.
  * Keine BLE-Verbindungen.
- * Keine automatischen XiaoZhi-Trigger.
+ * Raumwechsel werden ueber einen Callback gemeldet.
  */
 
 namespace HmbMuseumGuideBeacon {
+
+    using RoomChangedCallback = void (*)(int room_index);
+
     void Start();
+    void SetRoomChangedCallback(RoomChangedCallback callback);
+
 }
