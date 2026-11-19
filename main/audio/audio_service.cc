@@ -1,3 +1,4 @@
+#include "esp_partition.h"
 #include <cmath>
 #include "audio_service.h"
 #include <esp_log.h>
@@ -26,6 +27,10 @@
 
 #define TAG "AudioService"
 
+// HMB|TEC VoiceRecorder: Flash-Wiederherstellung
+bool RecorderFlashLoad(std::vector<uint8_t>& data,
+                       uint32_t& samples);
+
 AudioService::AudioService() { event_group_ = xEventGroupCreate(); }
 
 AudioService::~AudioService() {
@@ -49,6 +54,17 @@ AudioService::~AudioService() {
 void AudioService::Initialize(AudioCodec* codec) {
     codec_ = codec;
     codec_->Start();
+
+    // HMB|TEC: Letzte Sprachaufnahme aus Flash wiederherstellen.
+    {
+        std::lock_guard<std::mutex> lock(voice_recorder_mutex_);
+
+        if (!RecorderFlashLoad(voice_recorder_data_,
+                               voice_recorder_samples_)) {
+            voice_recorder_data_.clear();
+            voice_recorder_samples_ = 0;
+        }
+    }
 
     esp_opus_dec_cfg_t opus_dec_cfg =
         OPUS_DEC_CFG(codec->output_sample_rate(), OPUS_FRAME_DURATION_MS);
@@ -579,6 +595,10 @@ bool AudioService::StartVoiceRecording() {
     return true;
 }
 
+// HMB|TEC VoiceRecorder: Flash-Speicherung
+bool RecorderFlashSave(const uint8_t* data, size_t length,
+                       uint32_t samples);
+
 void AudioService::StopVoiceRecording() {
     voice_recorder_active_.store(false);
 
@@ -593,10 +613,182 @@ void AudioService::StopVoiceRecording() {
              "VoiceRecorder: Aufnahme beendet, %lu Samples, %u Bytes",
              static_cast<unsigned long>(voice_recorder_samples_),
              static_cast<unsigned>(voice_recorder_data_.size()));
+
+    if (voice_recorder_samples_ > 0 &&
+        !voice_recorder_data_.empty()) {
+
+        const bool saved = RecorderFlashSave(
+            voice_recorder_data_.data(),
+            voice_recorder_data_.size(),
+            voice_recorder_samples_);
+
+        ESP_LOGI(TAG, "VoiceRecorder: Flash-Speicherung %s",
+                 saved ? "OK" : "FEHLER");
+    }
 }
 
 
 // HMB|TEC VoiceRecorder V0.9.28
+
+// HMB|TEC VoiceRecorder: persistentes Flash-Format V1
+namespace {
+constexpr uint32_t kRecorderMagic = 0x484D4252; // HMBR
+constexpr uint32_t kRecorderVersion = 1;
+
+uint32_t RecorderCrc32(const uint8_t* data, size_t length) {
+    uint32_t crc = 0xFFFFFFFFU;
+
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= data[i];
+
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^
+                  ((crc & 1U) ? 0xEDB88320U : 0U);
+        }
+    }
+
+    return ~crc;
+}
+
+struct RecorderFlashHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t samples;
+    uint32_t crc32;
+};
+
+static_assert(sizeof(RecorderFlashHeader) == 16,
+              "RecorderFlashHeader muss 16 Byte haben");
+} // namespace
+
+
+// HMB|TEC VoiceRecorder: ADPCM-Aufnahme dauerhaft speichern
+bool RecorderFlashSave(const uint8_t* data, size_t length,
+                       uint32_t samples) {
+    if (!data || length == 0 || length > 20000 ||
+        samples == 0 || samples > 40000 ||
+        length != (samples + 1U) / 2U) {
+        return false;
+    }
+
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        static_cast<esp_partition_subtype_t>(0x40),
+        "recorder");
+
+    if (!partition) {
+        ESP_LOGE("VoiceRecorder", "Recorder-Partition nicht gefunden");
+        return false;
+    }
+
+    const size_t total = sizeof(RecorderFlashHeader) + length;
+    const size_t erase_size = (total + 4095U) & ~4095U;
+
+    if (erase_size > partition->size) {
+        ESP_LOGE("VoiceRecorder", "Recorder-Partition zu klein");
+        return false;
+    }
+
+    esp_err_t err = esp_partition_erase_range(
+        partition, 0, erase_size);
+
+    if (err != ESP_OK) {
+        ESP_LOGE("VoiceRecorder", "Flash erase: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+
+    // Erst Audiodaten schreiben.
+    err = esp_partition_write(
+        partition, sizeof(RecorderFlashHeader), data, length);
+
+    if (err != ESP_OK) {
+        ESP_LOGE("VoiceRecorder", "Flash write: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+
+    // Header zuletzt schreiben: Aufnahme wird erst jetzt gueltig.
+    const RecorderFlashHeader header = {
+        kRecorderMagic,
+        kRecorderVersion,
+        samples,
+        RecorderCrc32(data, length)
+    };
+
+    err = esp_partition_write(partition, 0,
+                              &header, sizeof(header));
+
+    if (err != ESP_OK) {
+        ESP_LOGE("VoiceRecorder", "Flash header: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI("VoiceRecorder",
+             "Aufnahme gespeichert: %u Samples, %u Bytes",
+             (unsigned)samples, (unsigned)length);
+
+    return true;
+}
+
+
+// HMB|TEC VoiceRecorder: Aufnahme aus Flash wiederherstellen
+bool RecorderFlashLoad(std::vector<uint8_t>& data,
+                       uint32_t& samples) {
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        static_cast<esp_partition_subtype_t>(0x40),
+        "recorder");
+
+    if (!partition) {
+        ESP_LOGE("VoiceRecorder", "Recorder-Partition nicht gefunden");
+        return false;
+    }
+
+    RecorderFlashHeader header = {};
+
+    esp_err_t err = esp_partition_read(
+        partition, 0, &header, sizeof(header));
+
+    if (err != ESP_OK ||
+        header.magic != kRecorderMagic ||
+        header.version != kRecorderVersion ||
+        header.samples == 0 ||
+        header.samples > 40000) {
+        ESP_LOGI("VoiceRecorder", "Keine gueltige Aufnahme im Flash");
+        return false;
+    }
+
+    const size_t length = (header.samples + 1U) / 2U;
+
+    if (length > 20000 ||
+        sizeof(header) + length > partition->size) {
+        return false;
+    }
+
+    std::vector<uint8_t> buffer(length);
+
+    err = esp_partition_read(
+        partition, sizeof(header), buffer.data(), length);
+
+    if (err != ESP_OK ||
+        RecorderCrc32(buffer.data(), length) != header.crc32) {
+        ESP_LOGE("VoiceRecorder", "Flash CRC32-Pruefung fehlgeschlagen");
+        return false;
+    }
+
+    data = std::move(buffer);
+    samples = header.samples;
+
+    ESP_LOGI("VoiceRecorder",
+             "Aufnahme geladen: %lu Samples, %u Bytes",
+             static_cast<unsigned long>(samples),
+             static_cast<unsigned>(data.size()));
+
+    return true;
+}
+
 bool AudioService::PlayVoiceRecording() {
     if (service_stopped_.load() || voice_recorder_active_.load()) {
         return false;

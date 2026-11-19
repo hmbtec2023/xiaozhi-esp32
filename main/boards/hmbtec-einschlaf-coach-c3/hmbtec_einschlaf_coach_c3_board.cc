@@ -10,7 +10,7 @@ static std::atomic<bool> hmb_fireplace_end_conversation{false};
 /*
  * HMB | TEC Build Information
  * PROJECT_NAME: HMBTEC_Einschlaf_Coach_C3
- * PROJECT_VERSION: 0.9.27
+ * PROJECT_VERSION: 0.9.28
  * BOARD: ESP32-C3 SuperMini
  * FRAMEWORK: ESP-IDF 6.1 / XiaoZhi
  *
